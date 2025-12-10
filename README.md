@@ -128,10 +128,18 @@ python run_evaluation.py \
 ```
 Results, logs, and visualizations will be saved in ./outputs/evaluation_results.
 
-<!-- Citation
-If you find our work useful, please consider citing:
+## Citation
 
-코드 스니펫
+```Bash
 
-[PLACEHOLDER: BibTeX 인용 정보를 여기에 삽입하세요.]
--->
+@article{song2025multi,
+  title={Multi-Agent Visual Reasoning for Out-of-Distribution Detection in Complex Road Environments},
+  author={Song, Jeonghyo and Yun, Kimin and Jo, Dae Ung and Kim, Jinyoung and Yoo, Youngjoon},
+  journal={IEEE Access},
+  volume={13},
+  pages={188198--188216},
+  year={2025},
+  publisher={IEEE}
+}
+
+```
