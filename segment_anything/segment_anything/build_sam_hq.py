@@ -104,7 +104,7 @@ def _build_sam(
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            state_dict = torch.load(f, map_location=device)
+            state_dict = torch.load(f, map_location=device, weights_only=False)
         info = sam.load_state_dict(state_dict, strict=False)
         print(info)
     for n, p in sam.named_parameters():
