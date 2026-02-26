@@ -57,8 +57,9 @@ def load_gdino_model():
     print("📦 Loading GroundingDINO...")
     args = SLConfig.fromfile(DEFAULT_GDINO_CONFIG)
     args.device = DEVICE
+    args.bert_base_uncased_path = None
     _gdino_model = build_model(args)
-    checkpoint = torch.load(DEFAULT_GDINO_CKPT, map_location="cpu")
+    checkpoint = torch.load(DEFAULT_GDINO_CKPT, map_location="cpu", weights_only=False)
     _gdino_model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     _gdino_model = _gdino_model.to(DEVICE)
     _gdino_model.eval()
