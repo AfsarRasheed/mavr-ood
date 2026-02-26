@@ -186,7 +186,7 @@ def fix_torch_load():
 # Fix 4: Install missing dependencies
 # ============================================================
 def install_deps():
-    print("\n� Fix 4: Installing missing dependencies")
+    print("\n🔧 Fix 4: Installing missing dependencies")
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "addict", "yapf"])
         print("  ✅ Installed addict, yapf")
@@ -195,10 +195,30 @@ def install_deps():
 
 
 # ============================================================
+# Fix 4b: Install local segment_anything (overrides any pip version)
+# ============================================================
+def install_local_packages():
+    print("\n🔧 Fix 4b: Installing local segment_anything package")
+    try:
+        # Uninstall any pip version that might conflict
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "segment_anything"],
+            capture_output=True, text=True
+        )
+        # Install our local copy (which includes SAM-HQ)
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-q", "-e", SAM_ROOT]
+        )
+        print("  ✅ Local segment_anything installed")
+    except Exception as e:
+        print(f"  ⚠️  Failed: {e}")
+
+
+# ============================================================
 # Fix 5: Rebuild GroundingDINO
 # ============================================================
 def rebuild_groundingdino():
-    print("\n� Fix 5: Rebuilding GroundingDINO CUDA extensions")
+    print("\n🔧 Fix 5: Rebuilding GroundingDINO CUDA extensions")
     env = os.environ.copy()
     env["BUILD_WITH_CUDA"] = "True"
     env["CUDA_HOME"] = os.environ.get("CUDA_HOME", "/usr/local/cuda")
@@ -287,6 +307,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     install_deps()
+    install_local_packages()
     fix_bertwarper()
     fix_cuda_source()
     fix_torch_load()
