@@ -14,6 +14,9 @@ import copy
 sys.path.append(os.path.join(os.getcwd(), "GroundingDINO"))
 sys.path.append(os.path.join(os.getcwd(), "segment_anything"))
 
+# CLIP Semantic Verifier
+from src.clip_verifier import CLIPVerifier
+
 from dataset import DatasetFactory
 
 import GroundingDINO.groundingdino.datasets.transforms as T
@@ -300,9 +303,9 @@ def create_failure_metrics():
         'F1': 0.0,
         'Precision': 0.0,
         'Recall': 0.0,
-        'FPR95': 1.0,     # 최악의 FPR
-        'AUROC': 0.0,     # 최악의 AUROC
-        'AUUPRC': 0.0     # 최악의 AUUPRC
+        'FPR95': 1.0,     # worst-case FPR
+        'AUROC': 0.0,     # worst-case AUROC
+        'AUUPRC': 0.0     # worst-case AUUPRC
     }
 
 
@@ -317,22 +320,37 @@ def load_multiagent_prompts(json_path):
         
         if 'results' in data:
             for result in data['results']:
-                if 'image_info' in result and 'final_prompts' in result:
-
+                # Get image name — support both formats
+                image_name = None
+                if 'image_info' in result:
                     if isinstance(result['image_info'], dict):
                         image_name = result['image_info'].get('filename', 'unknown')
                     else:
                         image_name = result['image_info']
-                    
+                elif 'image' in result:
+                    image_name = result['image']
+                
+                if not image_name:
+                    continue
+
+                # Get prompts — support both formats
+                final_prompts = None
+                if 'final_prompts' in result:
                     final_prompts = result['final_prompts']
-                    
-                    if 'prompt_v1' in final_prompts and 'prompt_v2' in final_prompts:
-                        prompt_dict[image_name] = {
-                            'prompt_v1': final_prompts['prompt_v1'],
-                            'prompt_v2': final_prompts['prompt_v2'],
-                            'overall_confidence': final_prompts.get('overall_confidence', 0.0),
-                            'detection_confidence': final_prompts.get('detection_confidence', 0.0)
-                        }
+                elif 'synthesis_result' in result:
+                    sr = result['synthesis_result']
+                    if 'grounded_sam_prompts' in sr:
+                        final_prompts = sr['grounded_sam_prompts']
+                    elif 'prompt_v1' in sr:
+                        final_prompts = sr
+                
+                if final_prompts and 'prompt_v1' in final_prompts and 'prompt_v2' in final_prompts:
+                    prompt_dict[image_name] = {
+                        'prompt_v1': final_prompts['prompt_v1'],
+                        'prompt_v2': final_prompts['prompt_v2'],
+                        'overall_confidence': final_prompts.get('overall_confidence', 0.0),
+                        'detection_confidence': final_prompts.get('detection_confidence', 0.0)
+                    }
         
         print(f"✓ Loaded prompts for {len(prompt_dict)} images from {json_path}")
         
@@ -351,7 +369,7 @@ def load_multiagent_prompts(json_path):
         return {}
 
 
-def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device="cpu"):
+def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device="cpu", clip_verifier=None):
 
     box_thresholds = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
     text_thresholds = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
@@ -394,6 +412,15 @@ def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device
                 boxes_processed[i][2:] += boxes_processed[i][:2]
             
             boxes_processed = boxes_processed.cpu()
+
+            # CLIP verification: filter detections before SAM
+            if clip_verifier is not None:
+                boxes_processed, pred_phrases, clip_scores, _ = clip_verifier.verify_detections(
+                    image_cv, boxes_processed, pred_phrases, text_prompt
+                )
+                if len(boxes_processed) == 0:
+                    continue
+
             transformed_boxes = predictor.transform.apply_boxes_torch(
                 boxes_processed, image_cv.shape[:2]
             ).to(device)
@@ -449,7 +476,7 @@ def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device
 
 
 def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_dict, 
-                                            output_dir, device="cpu"):
+                                            output_dir, device="cpu", clip_verifier=None):
 
     all_metrics = []
     threshold_stats = {'box_thresholds_v1': [], 'text_thresholds_v1': [], 
@@ -487,12 +514,12 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
             
             # V1 prompt optimization
             best_thresholds_v1, best_metrics_v1, best_results_v1 = optimize_thresholds_for_prompt(
-                model, predictor, sample, prompt_v1, device
+                model, predictor, sample, prompt_v1, device, clip_verifier=clip_verifier
             )
             
             # V2 prompt optimization
             best_thresholds_v2, best_metrics_v2, best_results_v2 = optimize_thresholds_for_prompt(
-                model, predictor, sample, prompt_v2, device
+                model, predictor, sample, prompt_v2, device, clip_verifier=clip_verifier
             )
             
             # both failed
@@ -1283,6 +1310,8 @@ if __name__ == "__main__":
     parser.add_argument("--text_threshold", type=float, default=0.25, 
                        help="text threshold (used only when not optimizing)")
     
+    parser.add_argument("--clip_threshold", type=float, default=0.20,
+                       help="CLIP similarity threshold for semantic verification (0.0 to disable)")
     parser.add_argument("--device", type=str, default="cpu", help="device to run on")
     parser.add_argument("--bert_base_uncased_path", type=str, required=False, help="bert_base_uncased model path")
     
@@ -1328,6 +1357,15 @@ if __name__ == "__main__":
             print("Error: No valid prompts loaded from JSON file")
             sys.exit(1)
         
+        # Initialize CLIP verifier
+        clip_verifier = None
+        if args.clip_threshold > 0:
+            print(f"🔍 Initializing CLIP verifier (threshold={args.clip_threshold})...")
+            clip_verifier = CLIPVerifier(
+                device=args.device,
+                similarity_threshold=args.clip_threshold
+            )
+        
         # evaluate with multi-agent prompts
         metrics = evaluate_dataset_with_multiagent_prompts(
             model=model,
@@ -1335,7 +1373,8 @@ if __name__ == "__main__":
             dataset=dataset,
             prompt_dict=prompt_dict,
             output_dir=args.output_dir,
-            device=args.device
+            device=args.device,
+            clip_verifier=clip_verifier
         )
         
     elif args.optimize_thresholds:

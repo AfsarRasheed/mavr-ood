@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 dataset.py - Dataset classes for anomaly detection datasets
-각 데이터셋의 특성에 맞는 전용 클래스들
+Dedicated classes tailored to the characteristics of each dataset
 """
 
 import os
@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 
 
 class BaseAnomalyDataset(Dataset, ABC):
-    """기본 이상 탐지 데이터셋 클래스"""
+    """Base anomaly detection dataset class"""
     
     def __init__(self, dataset_dir, split='all'):
         self.dataset_dir = dataset_dir
@@ -23,7 +23,7 @@ class BaseAnomalyDataset(Dataset, ABC):
         self.label_paths = []
         self.dataset_name = self.__class__.__name__
         
-        # 데이터 로딩
+        # Load data
         self._load_data()
         
         print(f"Loaded {self.dataset_name}: {len(self.image_paths)} samples")
@@ -32,12 +32,12 @@ class BaseAnomalyDataset(Dataset, ABC):
     
     @abstractmethod
     def _load_data(self):
-        """데이터셋별 데이터 로딩 구현"""
+        """Implement data loading for each dataset"""
         pass
     
     @abstractmethod
     def _process_mask(self, mask):
-        """데이터셋별 마스크 처리 구현"""
+        """Implement mask processing for each dataset"""
         pass
     
     def __len__(self):
@@ -47,10 +47,10 @@ class BaseAnomalyDataset(Dataset, ABC):
         image_path = self.image_paths[idx]
         label_path = self.label_paths[idx]
         
-        # 이미지 로딩
+        # Load image
         image = Image.open(image_path).convert("RGB")
         
-        # 마스크 로딩 및 처리
+        # Load and process mask
         mask = np.array(Image.open(label_path))
         binary_mask = self._process_mask(mask)
         
@@ -63,7 +63,7 @@ class BaseAnomalyDataset(Dataset, ABC):
         }
     
     def get_sample_info(self, idx):
-        """샘플 정보 반환"""
+        """Return sample information"""
         sample = self[idx]
         return {
             'index': idx,
@@ -76,9 +76,9 @@ class BaseAnomalyDataset(Dataset, ABC):
 
 
 class RoadAnomalyDataset(BaseAnomalyDataset):
-    """Road Anomaly 데이터셋
-    - 마스크 값: 0 (배경), 1 (이상)
-    - 파일 형식: .jpg -> .png
+    """Road Anomaly dataset
+    - Mask values: 0 (background), 1 (anomaly)
+    - File format: .jpg -> .png
     """
     
     def _load_data(self):
@@ -89,13 +89,13 @@ class RoadAnomalyDataset(BaseAnomalyDataset):
             print(f"Warning: Directory not found - {original_dir} or {label_dir}")
             return
         
-        # 이미지 파일 찾기
+        # Find image files
         image_extensions = ['*.jpg', '*.jpeg', '*.png']
         image_files = []
         for ext in image_extensions:
             image_files.extend(glob(os.path.join(original_dir, ext)))
         
-        # 매칭되는 라벨 찾기
+        # Find matching labels
         for image_path in sorted(image_files):
             base_name = os.path.splitext(os.path.basename(image_path))[0]
             label_path = os.path.join(label_dir, f"{base_name}.png")
@@ -107,23 +107,23 @@ class RoadAnomalyDataset(BaseAnomalyDataset):
                 print(f"Warning: No label found for {base_name}")
     
     def _process_mask(self, mask):
-        """Road Anomaly: 0이 아닌 모든 값을 positive로 처리"""
-        # 마스크 차원 확인
+        """Road Anomaly: treat all non-zero values as positive"""
+        # Check mask dimensions
         if len(mask.shape) == 3:
-            # RGB 마스크인 경우 - 평균내서 그레이스케일로
+            # If RGB mask - convert to grayscale by averaging
             mask = mask.mean(axis=2)
         
-        # 0이 아닌 값을 positive로 처리 (0-1 범위 마스크)
+        # Treat non-zero values as positive (0-1 range mask)
         binary_mask = (mask > 0).astype(bool)
         
         return binary_mask
 
 
 class FishyscapesDataset(BaseAnomalyDataset):
-    """Fishyscapes 데이터셋 (LostAndFound, Static)
-    - 마스크 값: 0 (배경), 1 (OOD 객체), 255 (알려진 객체)
-    - OOD 탐지이므로 값이 1인 픽셀만 positive로 처리
-    - 파일 형식: .png -> .png
+    """Fishyscapes dataset (LostAndFound, Static)
+    - Mask values: 0 (background), 1 (OOD object), 255 (known object)
+    - For OOD detection, only pixels with value 1 are treated as positive
+    - File format: .png -> .png
     """
     
     def _load_data(self):
@@ -134,10 +134,10 @@ class FishyscapesDataset(BaseAnomalyDataset):
             print(f"Warning: Directory not found - {original_dir} or {label_dir}")
             return
         
-        # PNG 이미지 파일 찾기
+        # Find PNG image files
         image_files = glob(os.path.join(original_dir, '*.png'))
         
-        # 매칭되는 라벨 찾기
+        # Find matching labels
         for image_path in sorted(image_files):
             base_name = os.path.splitext(os.path.basename(image_path))[0]
             label_path = os.path.join(label_dir, f"{base_name}.png")
@@ -149,27 +149,27 @@ class FishyscapesDataset(BaseAnomalyDataset):
                 print(f"Warning: No label found for {base_name}")
     
     def _process_mask(self, mask):
-        """Fishyscapes: 값이 1인 픽셀만 positive로 처리 (OOD 객체)"""
-        # Fishyscapes 마스크 값 의미:
-        # 0: 배경 (정상)
-        # 1: OOD 객체 (이상) <- 이것만 positive로 처리
-        # 255: 알려진 객체 (정상)
+        """Fishyscapes: only pixels with value 1 are treated as positive (OOD objects)"""
+        # Fishyscapes mask value meanings:
+        # 0: background (normal)
+        # 1: OOD object (anomaly) <- only this is treated as positive
+        # 255: known object (normal)
         
         if len(mask.shape) == 3:
-            # RGB 마스크인 경우 첫 번째 채널 사용
+            # If RGB mask, use the first channel
             mask = mask[:, :, 0]
         
-        # 오직 값이 1인 픽셀만 positive로 처리
+        # Only treat pixels with value 1 as positive
         binary_mask = (mask == 1).astype(bool)
         
         return binary_mask
 
 
 class SegmentMeDataset(BaseAnomalyDataset):
-    """Segment Me 데이터셋 (AnomalyTrack, ObstacleTrack)
-    - validation 시리즈만 라벨이 있음
-    - 라벨 파일명: validation*_labels_semantic_color.png (color 버전 사용)
-    - 마스크: 주황색 픽셀만 OOD 객체로 처리
+    """Segment Me dataset (AnomalyTrack, ObstacleTrack)
+    - Only validation series have labels
+    - Label filename: validation*_labels_semantic_color.png (color version used)
+    - Mask: only orange pixels are treated as OOD objects
     """
     
     def _load_data(self):
@@ -180,14 +180,14 @@ class SegmentMeDataset(BaseAnomalyDataset):
             print(f"Warning: Directory not found - {original_dir} or {label_dir}")
             return
         
-        # validation 시리즈의 semantic 라벨 찾기 (color 버전 포함)
+        # Find semantic labels for validation series (including color version)
         # AnomalyTrack: validation0000_labels_semantic_color.png
         # ObstacleTrack: validation_1_labels_semantic_color.png
         label_patterns = [
-            'validation*_labels_semantic_color.png',  # color 버전
-            'validation*_labels_semantic.png',        # 일반 버전 (백업)
-            'validation_*_labels_semantic_color.png', # ObstacleTrack color 버전
-            'validation_*_labels_semantic.png'        # ObstacleTrack 일반 버전 (백업)
+            'validation*_labels_semantic_color.png',  # color version
+            'validation*_labels_semantic.png',        # standard version (fallback)
+            'validation_*_labels_semantic_color.png', # ObstacleTrack color version
+            'validation_*_labels_semantic.png'        # ObstacleTrack standard version (fallback)
         ]
         
         label_files = []
@@ -195,30 +195,30 @@ class SegmentMeDataset(BaseAnomalyDataset):
             found_labels = glob(os.path.join(label_dir, pattern))
             label_files.extend(found_labels)
         
-        # 중복 제거 (같은 base name의 경우 color 버전 우선)
+        # Remove duplicates (prefer color version for same base name)
         label_dict = {}
         for label_path in label_files:
             label_filename = os.path.basename(label_path)
             
-            # base name 추출
+            # Extract base name
             if '_labels_semantic_color' in label_filename:
                 base_name = label_filename.replace('_labels_semantic_color.png', '')
-                priority = 1  # color 버전이 우선
+                priority = 1  # color version takes priority
             elif '_labels_semantic' in label_filename:
                 base_name = label_filename.replace('_labels_semantic.png', '')
-                priority = 2  # 일반 버전은 백업
+                priority = 2  # standard version as fallback
             else:
                 continue
             
-            # 우선순위가 높은 것만 유지
+            # Keep only the highest priority
             if base_name not in label_dict or priority < label_dict[base_name][1]:
                 label_dict[base_name] = (label_path, priority)
         
         print(f"Found {len(label_dict)} unique label files")
         
-        # 이미지-라벨 매칭
+        # Match images to labels
         for base_name, (label_path, _) in label_dict.items():
-            # 해당하는 이미지 파일 찾기 (다양한 확장자 시도)
+            # Find corresponding image file (try various extensions)
             possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
             image_path = None
             
@@ -235,31 +235,31 @@ class SegmentMeDataset(BaseAnomalyDataset):
                 print(f"Warning: No image found for {base_name}")
     
     def _process_mask(self, mask):
-        """Segment Me: 주황색 픽셀만 positive로 처리"""
+        """Segment Me: only treat orange pixels as positive"""
         if len(mask.shape) == 3:
-            # RGB 마스크에서 주황색 픽셀 감지
+            # Detect orange pixels in RGB mask
             
-            # 방법 1: RGB 기반 주황색 감지 (관대한 범위)
-            # 주황색 범위: R > 150, G > 30, G < 200, B < 100
+            # Method 1: RGB-based orange detection (lenient range)
+            # Orange range: R > 150, G > 30, G < 200, B < 100
             orange_mask_rgb = (mask[:, :, 0] > 150) & \
                               (mask[:, :, 1] > 30) & \
                               (mask[:, :, 1] < 200) & \
                               (mask[:, :, 2] < 100)
             
-            # 방법 2: HSV 기반 주황색 감지 (더 정확함)
+            # Method 2: HSV-based orange detection (more accurate)
             try:
                 import cv2
                 hsv = cv2.cvtColor(mask, cv2.COLOR_RGB2HSV)
                 
-                # 주황색 HSV 범위 (OpenCV HSV: H=0-179, S=0-255, V=0-255)
-                # 주황색: H=10-25, S=100-255, V=100-255
-                lower_orange = np.array([5, 50, 50])    # 더 넓은 범위
+                # Orange HSV range (OpenCV HSV: H=0-179, S=0-255, V=0-255)
+                # Orange: H=10-25, S=100-255, V=100-255
+                lower_orange = np.array([5, 50, 50])    # wider range
                 upper_orange = np.array([30, 255, 255])
                 
                 hsv_orange_mask = cv2.inRange(hsv, lower_orange, upper_orange)
                 orange_mask_hsv = (hsv_orange_mask > 0)
                 
-                # 더 많은 픽셀을 찾는 방법 사용
+                # Use the method that finds more pixels
                 if np.sum(orange_mask_hsv) > np.sum(orange_mask_rgb):
                     binary_mask = orange_mask_hsv.astype(bool)
                 else:
@@ -270,7 +270,7 @@ class SegmentMeDataset(BaseAnomalyDataset):
                 binary_mask = orange_mask_rgb.astype(bool)
                 
         else:
-            # 그레이스케일 마스크인 경우 (예상되지 않음)
+            # Grayscale mask case (unexpected)
             print("Warning: Grayscale mask detected in Segment Me dataset")
             binary_mask = (mask > 0).astype(bool)
         
@@ -278,14 +278,14 @@ class SegmentMeDataset(BaseAnomalyDataset):
 
 
 class DatasetFactory:
-    """데이터셋 팩토리 클래스"""
+    """Dataset factory class"""
     
     @staticmethod
     def create_dataset(dataset_dir, dataset_type=None):
-        """데이터셋 타입에 따라 적절한 데이터셋 클래스 생성"""
+        """Create appropriate dataset class based on dataset type"""
         
         if dataset_type is None:
-            # 경로를 보고 자동으로 타입 감지
+            # Auto-detect type from path
             dataset_type = DatasetFactory._detect_dataset_type(dataset_dir)
         
         print(f"Creating dataset: {dataset_type} for {dataset_dir}")
@@ -301,7 +301,7 @@ class DatasetFactory:
     
     @staticmethod
     def _detect_dataset_type(dataset_dir):
-        """디렉토리 경로를 보고 데이터셋 타입 자동 감지"""
+        """Auto-detect dataset type from directory path"""
         dataset_dir_lower = dataset_dir.lower()
         
         if 'road_anomaly' in dataset_dir_lower:
@@ -311,13 +311,13 @@ class DatasetFactory:
         elif 'segment_me' in dataset_dir_lower or 'anomalytrack' in dataset_dir_lower or 'obstacletrack' in dataset_dir_lower:
             return 'segment_me'
         else:
-            # 기본값으로 road_anomaly 스타일 사용
+            # Default to road_anomaly style
             print(f"Warning: Could not detect dataset type for {dataset_dir}, using road_anomaly as default")
             return 'road_anomaly'
 
 
 def test_segment_me_datasets():
-    """Segment Me 데이터셋 테스트"""
+    """Test Segment Me datasets"""
     dataset_paths = [
         "/home/jeonghyo/Gaebal/Datasets/segment_me_val/dataset_AnomalyTrack",
         "/home/jeonghyo/Gaebal/Datasets/segment_me_val/dataset_ObstacleTrack"
@@ -333,7 +333,7 @@ def test_segment_me_datasets():
         print(f"{'='*60}")
         
         try:
-            # 데이터셋 생성
+            # Create dataset
             dataset = DatasetFactory.create_dataset(dataset_dir)
             
             if len(dataset) == 0:
@@ -342,7 +342,7 @@ def test_segment_me_datasets():
             
             print(f"✅ Dataset loaded successfully: {len(dataset)} samples")
             
-            # 첫 3개 샘플 테스트
+            # Test first 3 samples
             for i in range(min(3, len(dataset))):
                 print(f"\n--- Sample {i} ---")
                 sample_info = dataset.get_sample_info(i)
@@ -353,10 +353,10 @@ def test_segment_me_datasets():
                 print(f"Positive pixels: {sample_info['positive_pixels']}")
                 print(f"Positive ratio: {sample_info['positive_ratio']:.4f}")
                 
-                # 실제 샘플 로딩 테스트
+                # Test actual sample loading
                 sample = dataset[i]
                 
-                # 크기 일치 확인
+                # Check size consistency
                 image_hw = sample['image'].size[::-1]  # PIL: (W, H) -> (H, W)
                 mask_hw = sample['mask'].shape
                 
@@ -365,7 +365,7 @@ def test_segment_me_datasets():
                 else:
                     print(f"❌ Size mismatch: Image {image_hw} vs Mask {mask_hw}")
                 
-                # 마스크 값 확인
+                # Check mask values
                 mask_unique = np.unique(sample['mask'])
                 print(f"Mask unique values: {mask_unique}")
                 

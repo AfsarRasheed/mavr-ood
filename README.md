@@ -31,10 +31,15 @@ To address these fundamental limitations, we propose a novel multi-agent visual 
     ```
 
 2.  **Create Environment & Install Dependencies:**
-    (Python 3.10 recommended)
+    (Python 3.10 recommended, CUDA 11.8+)
     ```bash
     pip install -r requirements.txt
     ```
+    
+    This will install:
+    - **LLaVA-7B** dependencies (transformers, bitsandbytes, accelerate)
+    - **CLIP** (OpenAI CLIP for semantic verification)
+    - **GroundingDINO + SAM** dependencies
 
 3.  **Download Model Weights:**
     Create a `weights/` directory and download the pre-trained model weights into it.
@@ -48,23 +53,13 @@ To address these fundamental limitations, we propose a novel multi-agent visual 
     wget -P weights/ [https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth)
     ```
 
-4.  **Set Up OpenAI API Key** 🔑
-    This project requires an OpenAI API key (for GPT-4o). You must manually edit **all 5 agent scripts** to insert your key.
-
-    Open the following files and replace the placeholder `openai.api_key = "[YOUR_API_KEY_HERE]"` with your actual key:
-    * `src/agents/agent1.py`
-    * `src/agents/agent2.py`
-    * `src/agents/agent3.py`
-    * `src/agents/agent4.py`
-    * `src/agents/agent5.py`
-
-    **Example (in `src/agents/agent1.py`):**
-    ```python
-    # Find this line:
-    openai.api_key = "[YOUR_API_KEY_HERE]" 
-    
-    # Replace it with your key:
-    openai.api_key = "sk-YOUR_ACTUAL_API_KEY_GOES_HERE"
+4.  **LLaVA-7B Model** 🧠
+    The LLaVA-1.5-7B model will be automatically downloaded from HuggingFace on first run.
+    It uses 4-bit quantization by default (~5-7GB VRAM). Configure in `.env`:
+    ```env
+    VLM_MODEL_NAME=llava-hf/llava-1.5-7b-hf
+    VLM_USE_4BIT=true
+    VLM_DEVICE=cuda
     ```
 ---
 
@@ -98,20 +93,20 @@ Stage 1: Run the Multi-Agent framework to analyze images and generate OOD prompt
 
 Stage 2: Run the GroundedSAM evaluation script using these prompts to get segmentation masks and scores.
 
-Stage 1: Generate Prompts (Multi-Agent Reasoning)
-Run run_all_agents.py to process all images in the challenging_subset directory. This will call Agents 1-5 sequentially and create a final JSON file (agent5_final_synthesis_results.json) containing the generated prompts.
+Stage 1: Generate Prompts (Multi-Agent Reasoning with LLaVA-7B)
+Run run_all_agents.py to process all images. This runs Agents 1-5 using local LLaVA-7B and creates `agent5_final_synthesis_results.json`.
 
 ```Bash
 
 python src/agents/run_all_agents.py \
     --image_dir ./data/challenging_subset/original \
     --output_dir ./outputs/challenging_subset_prompts \
-    --delay 60
+    --delay 2
 ```
---delay: Sets the delay (in seconds) between API calls to avoid rate limiting.
+--delay: Sets the delay (in seconds) between inference calls (default 2s for local model).
 
-Stage 2: Run Evaluation (Grounded Segmentation)
-Once you have the prompt JSON file, run run_evaluation.py to get the final mIoU and F1 scores reported in our paper.
+Stage 2: Run Evaluation (Grounded Segmentation + CLIP Verification)
+Once you have the prompt JSON file, run run_evaluation.py. CLIP verification is enabled by default to filter false positive detections.
 
 ```Bash
 
@@ -124,8 +119,10 @@ python run_evaluation.py \
     --dataset_type road_anomaly \
     --multiagent_prompts ./outputs/challenging_subset_prompts/agent5_final_synthesis_results.json \
     --output_dir ./outputs/evaluation_results \
+    --clip_threshold 0.20 \
     --device cuda
 ```
+--clip_threshold: CLIP semantic verification threshold (set to 0.0 to disable).
 Results, logs, and visualizations will be saved in ./outputs/evaluation_results.
 
 ## Citation

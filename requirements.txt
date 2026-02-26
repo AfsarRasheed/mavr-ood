@@ -1,32 +1,25 @@
-addict
-diffusers
-gradio
-huggingface_hub
-matplotlib
-numpy
-onnxruntime
-Pillow
-pycocotools
-PyYAML
-requests
-setuptools
-supervision
-termcolor
-timm
+# Core
 torch
 torchvision
-transformers
-yapf
-nltk
-fairscale
-litellm
-openai
-tqdm
-pycocotools
+numpy
+Pillow
 opencv-python
 matplotlib
-pillow
 scikit-learn
-onnxruntime
-onnx
-ipykernel
+tqdm
+
+# VLM Backend (LLaVA-7B)
+transformers>=4.36.0
+accelerate>=0.25.0
+bitsandbytes>=0.41.0
+
+# CLIP Verification
+git+https://github.com/openai/CLIP.git
+
+# GroundingDINO & SAM
+supervision
+
+# Utilities
+python-dotenv
+requests
+gradio>=4.0.0

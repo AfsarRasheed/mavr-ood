@@ -1,0 +1,662 @@
+#!/usr/bin/env python3
+"""
+MAVR-OOD Gradio Frontend
+Multi-Agent Visual Reasoning for Out-of-Distribution Object Detection
+
+Two tabs:
+  1. Single Image — upload one image, run full pipeline, see results
+  2. Batch Dataset — run pipeline on entire dataset folder
+"""
+
+import os
+import sys
+import json
+import numpy as np
+import torch
+import cv2
+import gradio as gr
+from PIL import Image
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+# Add paths for GroundingDINO and SAM
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "GroundingDINO"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "segment_anything"))
+
+import GroundingDINO.groundingdino.datasets.transforms as T
+from GroundingDINO.groundingdino.models import build_model
+from GroundingDINO.groundingdino.util.slconfig import SLConfig
+from GroundingDINO.groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
+from segment_anything import sam_model_registry, SamPredictor
+
+# =====================
+# Global model holders
+# =====================
+_gdino_model = None
+_sam_predictor = None
+_clip_verifier = None
+
+# Default paths
+DEFAULT_GDINO_CONFIG = "GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+DEFAULT_GDINO_CKPT = "weights/groundingdino_swint_ogc.pth"
+DEFAULT_SAM_CKPT = "weights/sam_vit_h_4b8939.pth"
+DEFAULT_DATASET_DIR = "./data/challenging_subset"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+# =====================
+# Model Loading
+# =====================
+def load_gdino_model():
+    """Load GroundingDINO model (singleton)."""
+    global _gdino_model
+    if _gdino_model is not None:
+        return _gdino_model
+
+    print("📦 Loading GroundingDINO...")
+    args = SLConfig.fromfile(DEFAULT_GDINO_CONFIG)
+    args.device = DEVICE
+    _gdino_model = build_model(args)
+    checkpoint = torch.load(DEFAULT_GDINO_CKPT, map_location="cpu")
+    _gdino_model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+    _gdino_model = _gdino_model.to(DEVICE)
+    _gdino_model.eval()
+    print("✅ GroundingDINO loaded")
+    return _gdino_model
+
+
+def load_sam_predictor():
+    """Load SAM predictor (singleton)."""
+    global _sam_predictor
+    if _sam_predictor is not None:
+        return _sam_predictor
+
+    print("📦 Loading SAM...")
+    sam = sam_model_registry["vit_h"](checkpoint=DEFAULT_SAM_CKPT)
+    sam = sam.to(DEVICE)
+    _sam_predictor = SamPredictor(sam)
+    print("✅ SAM loaded")
+    return _sam_predictor
+
+
+def load_clip_verifier():
+    """Load CLIP verifier (singleton)."""
+    global _clip_verifier
+    if _clip_verifier is not None:
+        return _clip_verifier
+
+    print("📦 Loading CLIP...")
+    from src.clip_verifier import CLIPVerifier
+    _clip_verifier = CLIPVerifier(device=DEVICE)
+    print("✅ CLIP loaded")
+    return _clip_verifier
+
+
+# =====================
+# Core Pipeline
+# =====================
+def preprocess_image(image_pil):
+    """Preprocess image for GroundingDINO."""
+    transform = T.Compose([
+        T.RandomResize([800], max_size=1333),
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    image_tensor, _ = transform(image_pil, None)
+    return image_tensor
+
+
+def get_grounding_output(model, image_tensor, caption, box_threshold=0.3, text_threshold=0.25):
+    """Run GroundingDINO detection."""
+    caption = caption.lower().strip()
+    if not caption.endswith("."):
+        caption += "."
+
+    image_tensor = image_tensor.to(DEVICE)
+    with torch.no_grad():
+        outputs = model(image_tensor[None], captions=[caption])
+
+    logits = outputs["pred_logits"].cpu().sigmoid()[0]
+    boxes = outputs["pred_boxes"].cpu()[0]
+
+    filt_mask = logits.max(dim=1)[0] > box_threshold
+    logits_filt = logits[filt_mask]
+    boxes_filt = boxes[filt_mask]
+
+    tokenizer = model.tokenizer
+    tokenized = tokenizer(caption)
+
+    pred_phrases = []
+    scores = []
+    for logit, box in zip(logits_filt, boxes_filt):
+        pred_phrase = get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer)
+        score = logit.max().item()
+        pred_phrases.append(f"{pred_phrase}({score:.2f})")
+        scores.append(score)
+
+    return boxes_filt, pred_phrases, scores
+
+
+def run_sam_segmentation(predictor, image_np, boxes):
+    """Run SAM segmentation on detected boxes."""
+    predictor.set_image(image_np)
+    H, W = image_np.shape[:2]
+
+    # Scale boxes from [0,1] to image size
+    boxes_scaled = boxes.clone()
+    boxes_scaled[:, 0] *= W  # x_center
+    boxes_scaled[:, 1] *= H  # y_center
+    boxes_scaled[:, 2] *= W  # width
+    boxes_scaled[:, 3] *= H  # height
+
+    # Convert from cxcywh to xyxy
+    boxes_xyxy = torch.zeros_like(boxes_scaled)
+    boxes_xyxy[:, 0] = boxes_scaled[:, 0] - boxes_scaled[:, 2] / 2
+    boxes_xyxy[:, 1] = boxes_scaled[:, 1] - boxes_scaled[:, 3] / 2
+    boxes_xyxy[:, 2] = boxes_scaled[:, 0] + boxes_scaled[:, 2] / 2
+    boxes_xyxy[:, 3] = boxes_scaled[:, 1] + boxes_scaled[:, 3] / 2
+
+    transformed_boxes = predictor.transform.apply_boxes_torch(
+        boxes_xyxy.to(DEVICE), (H, W)
+    )
+
+    masks, _, _ = predictor.predict_torch(
+        point_coords=None,
+        point_labels=None,
+        boxes=transformed_boxes,
+        multimask_output=False,
+    )
+
+    return masks.cpu(), boxes_xyxy
+
+
+def create_detection_visualization(image_np, boxes_xyxy, labels):
+    """Create image with bounding boxes drawn."""
+    vis = image_np.copy()
+    for box, label in zip(boxes_xyxy, labels):
+        x1, y1, x2, y2 = box.int().numpy()
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
+        cv2.putText(vis, label, (x1, max(y1 - 10, 0)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    return vis
+
+
+def create_mask_visualization(image_np, masks):
+    """Create image with SAM segmentation masks overlaid."""
+    vis = image_np.copy().astype(np.float32)
+    colors = [
+        [255, 0, 100],   # pink
+        [255, 165, 0],   # orange
+        [0, 255, 255],   # cyan
+        [255, 255, 0],   # yellow
+        [128, 0, 255],   # purple
+    ]
+    for i, mask in enumerate(masks):
+        mask_np = mask.squeeze().numpy().astype(bool)
+        color = np.array(colors[i % len(colors)], dtype=np.float32)
+        vis[mask_np] = vis[mask_np] * 0.4 + color * 0.6
+    return vis.astype(np.uint8)
+
+
+def create_binary_mask_visualization(image_np, masks):
+    """Create image with combined binary mask (pink overlay like reference)."""
+    vis = image_np.copy().astype(np.float32)
+    combined_mask = np.zeros(image_np.shape[:2], dtype=bool)
+    for mask in masks:
+        combined_mask |= mask.squeeze().numpy().astype(bool)
+    pink = np.array([255, 105, 180], dtype=np.float32)
+    vis[combined_mask] = vis[combined_mask] * 0.35 + pink * 0.65
+    return vis.astype(np.uint8)
+
+
+# =====================
+# Agent Pipeline
+# =====================
+def run_agents_on_image(image_path):
+    """Run all 5 agents on a single image and return analysis + prompts."""
+    from src.agents.vlm_backend import run_vlm
+
+    results = {}
+
+    # Agent 1: Scene Context
+    try:
+        from src.agents.agent1 import SceneContextAnalyzer
+        agent1 = SceneContextAnalyzer()
+        results["agent1"] = agent1.analyze_image(image_path)
+    except Exception as e:
+        results["agent1"] = {"error": str(e)}
+
+    # Agent 2: Spatial Anomaly
+    try:
+        from src.agents.agent2 import SpatialAnomalyDetector
+        agent2 = SpatialAnomalyDetector()
+        results["agent2"] = agent2.analyze_image(image_path)
+    except Exception as e:
+        results["agent2"] = {"error": str(e)}
+
+    # Agent 3: Semantic Inconsistency
+    try:
+        from src.agents.agent3 import SemanticInconsistencyAnalyzer
+        agent3 = SemanticInconsistencyAnalyzer()
+        results["agent3"] = agent3.analyze_image(image_path)
+    except Exception as e:
+        results["agent3"] = {"error": str(e)}
+
+    # Agent 4: Visual Appearance
+    try:
+        from src.agents.agent4 import VisualAppearanceEvaluator
+        agent4 = VisualAppearanceEvaluator()
+        results["agent4"] = agent4.analyze_image(image_path)
+    except Exception as e:
+        results["agent4"] = {"error": str(e)}
+
+    # Agent 5: Synthesis
+    try:
+        from src.agents.agent5 import ReasoningSynthesizer
+        agent5 = ReasoningSynthesizer()
+        # Build combined dict with keys agent5 expects
+        combined = {
+            "agent1_scene_context": results.get("agent1", {}),
+            "agent2_spatial_anomaly": results.get("agent2", {}),
+            "agent3_semantic_inconsistency": results.get("agent3", {}),
+            "agent4_visual_appearance": results.get("agent4", {}),
+        }
+        synthesis = agent5.synthesize_analysis(combined)
+        results["agent5"] = synthesis
+    except Exception as e:
+        results["agent5"] = {"error": str(e)}
+
+    return results
+
+
+def extract_prompts(agent_results):
+    """Extract prompt_v1 and prompt_v2 from agent 5 results."""
+    a5 = agent_results.get("agent5", {})
+    prompt_v1 = a5.get("prompt_v1", a5.get("detailed_prompt", "unusual object on road"))
+    prompt_v2 = a5.get("prompt_v2", a5.get("simple_prompt", "anomaly"))
+    return prompt_v1, prompt_v2
+
+
+# =====================
+# Single Image Pipeline
+# =====================
+def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progress()):
+    """Full pipeline for a single uploaded image."""
+    if image is None:
+        return None, None, None, "Please upload an image."
+
+    progress(0.05, desc="Saving uploaded image...")
+
+    # Save uploaded image temporarily
+    tmp_path = os.path.join("outputs", "temp_upload.jpg")
+    os.makedirs("outputs", exist_ok=True)
+    if isinstance(image, np.ndarray):
+        image_pil = Image.fromarray(image)
+    else:
+        image_pil = image
+    image_pil.save(tmp_path)
+    image_np = np.array(image_pil)
+
+    # Stage 1: Run agents
+    progress(0.1, desc="🤖 Running Agent 1: Scene Context...")
+    agent_results = run_agents_on_image(tmp_path)
+
+    progress(0.5, desc="🔍 Extracting prompts...")
+    prompt_v1, prompt_v2 = extract_prompts(agent_results)
+
+    # Stage 2: GroundingDINO Detection
+    progress(0.55, desc="📦 Loading GroundingDINO + SAM...")
+    gdino = load_gdino_model()
+    predictor = load_sam_predictor()
+    clip_verifier = load_clip_verifier()
+
+    progress(0.65, desc=f"🎯 Detecting with prompt: '{prompt_v1}'...")
+    image_tensor = preprocess_image(image_pil)
+
+    # Try prompt_v1
+    boxes, labels, scores = get_grounding_output(
+        gdino, image_tensor, prompt_v1,
+        box_threshold=box_threshold, text_threshold=0.25
+    )
+
+    # If no detections with v1, try v2
+    if len(boxes) == 0 and prompt_v2 != prompt_v1:
+        progress(0.7, desc=f"🎯 Trying prompt_v2: '{prompt_v2}'...")
+        boxes, labels, scores = get_grounding_output(
+            gdino, image_tensor, prompt_v2,
+            box_threshold=box_threshold, text_threshold=0.25
+        )
+
+    # CLIP verification
+    if len(boxes) > 0:
+        progress(0.75, desc="✅ CLIP verification...")
+        try:
+            # First convert GroundingDINO boxes (cxcywh normalized) to pixel xyxy for CLIP
+            H, W = image_np.shape[:2]
+            clip_boxes = boxes.clone()
+            clip_boxes[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * W
+            clip_boxes[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * H
+            clip_boxes[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * W
+            clip_boxes[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * H
+
+            clip_verifier.similarity_threshold = clip_threshold
+            filtered_boxes, filtered_phrases, clip_scores, _ = clip_verifier.verify_detections(
+                image_np, clip_boxes, labels, prompt_v1
+            )
+            if len(filtered_boxes) > 0:
+                # Convert back to normalized cxcywh for SAM pipeline
+                boxes_back = torch.zeros(len(filtered_boxes), 4)
+                boxes_back[:, 0] = ((filtered_boxes[:, 0] + filtered_boxes[:, 2]) / 2) / W
+                boxes_back[:, 1] = ((filtered_boxes[:, 1] + filtered_boxes[:, 3]) / 2) / H
+                boxes_back[:, 2] = (filtered_boxes[:, 2] - filtered_boxes[:, 0]) / W
+                boxes_back[:, 3] = (filtered_boxes[:, 3] - filtered_boxes[:, 1]) / H
+                boxes = boxes_back
+                labels = filtered_phrases
+        except Exception as e:
+            print(f"CLIP verification warning: {e}")
+
+    # SAM Segmentation
+    if len(boxes) > 0:
+        progress(0.8, desc="🎨 Running SAM segmentation...")
+        masks, boxes_xyxy = run_sam_segmentation(predictor, image_np, boxes)
+
+        progress(0.9, desc="🖼️ Creating visualizations...")
+        detection_img = create_detection_visualization(image_np, boxes_xyxy, labels)
+        mask_img = create_mask_visualization(image_np, masks)
+        binary_img = create_binary_mask_visualization(image_np, masks)
+    else:
+        detection_img = image_np.copy()
+        mask_img = image_np.copy()
+        binary_img = image_np.copy()
+
+    progress(1.0, desc="✅ Done!")
+
+    # Format agent analysis text
+    analysis_text = format_analysis(agent_results, prompt_v1, prompt_v2, len(boxes))
+
+    return detection_img, mask_img, binary_img, analysis_text
+
+
+def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
+    """Format agent analysis for display."""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("📊 DETECTION RESULTS")
+    lines.append("=" * 60)
+    lines.append(f"🎯 Prompt V1: \"{prompt_v1}\"")
+    lines.append(f"🎯 Prompt V2: \"{prompt_v2}\"")
+    lines.append(f"📦 Detections found: {num_detections}")
+    lines.append("")
+
+    for i, (name, data) in enumerate([
+        ("Agent 1 - Scene Context", agent_results.get("agent1", {})),
+        ("Agent 2 - Spatial Anomaly", agent_results.get("agent2", {})),
+        ("Agent 3 - Semantic Analysis", agent_results.get("agent3", {})),
+        ("Agent 4 - Visual Appearance", agent_results.get("agent4", {})),
+        ("Agent 5 - Synthesis", agent_results.get("agent5", {})),
+    ]):
+        lines.append(f"{'─' * 50}")
+        lines.append(f"🤖 {name}")
+        lines.append(f"{'─' * 50}")
+        if isinstance(data, dict):
+            if "error" in data:
+                lines.append(f"  ❌ Error: {data['error'][:100]}")
+            else:
+                for k, v in data.items():
+                    val_str = str(v)
+                    if len(val_str) > 150:
+                        val_str = val_str[:150] + "..."
+                    lines.append(f"  {k}: {val_str}")
+        else:
+            lines.append(f"  {str(data)[:200]}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# =====================
+# Batch Pipeline
+# =====================
+def process_batch(dataset_dir, clip_threshold, box_threshold, progress=gr.Progress()):
+    """Process all images in a dataset directory."""
+    if not dataset_dir or not os.path.exists(dataset_dir):
+        return [], "❌ Dataset directory not found. Check the path."
+
+    img_dir = os.path.join(dataset_dir, "original")
+    if not os.path.exists(img_dir):
+        img_dir = dataset_dir
+
+    image_files = sorted([
+        f for f in os.listdir(img_dir)
+        if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+    ])
+
+    if not image_files:
+        return [], "❌ No images found in the directory."
+
+    progress(0.05, desc="📦 Loading models...")
+    gdino = load_gdino_model()
+    predictor = load_sam_predictor()
+    clip_verifier = load_clip_verifier()
+
+    results_gallery = []
+    results_text_lines = []
+    results_text_lines.append(f"{'Image':<50} {'Prompt':<30} {'Detections':<12}")
+    results_text_lines.append("=" * 92)
+
+    for idx, img_file in enumerate(image_files):
+        pct = 0.1 + (0.85 * idx / len(image_files))
+        progress(pct, desc=f"Processing {idx+1}/{len(image_files)}: {img_file}")
+
+        img_path = os.path.join(img_dir, img_file)
+        image_pil = Image.open(img_path).convert("RGB")
+        image_np = np.array(image_pil)
+
+        # Run agents
+        try:
+            agent_results = run_agents_on_image(img_path)
+            prompt_v1, prompt_v2 = extract_prompts(agent_results)
+        except Exception as e:
+            prompt_v1 = "unusual object on road"
+            prompt_v2 = "anomaly"
+
+        # GroundingDINO
+        image_tensor = preprocess_image(image_pil)
+        boxes, labels, scores = get_grounding_output(
+            gdino, image_tensor, prompt_v1,
+            box_threshold=box_threshold, text_threshold=0.25
+        )
+
+        if len(boxes) == 0 and prompt_v2 != prompt_v1:
+            boxes, labels, scores = get_grounding_output(
+                gdino, image_tensor, prompt_v2,
+                box_threshold=box_threshold, text_threshold=0.25
+            )
+
+        # CLIP verification
+        if len(boxes) > 0:
+            try:
+                H_b, W_b = image_np.shape[:2]
+                clip_boxes = boxes.clone()
+                clip_boxes[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * W_b
+                clip_boxes[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * H_b
+                clip_boxes[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * W_b
+                clip_boxes[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * H_b
+
+                clip_verifier.similarity_threshold = clip_threshold
+                filtered_boxes, filtered_phrases, _, _ = clip_verifier.verify_detections(
+                    image_np, clip_boxes, labels, prompt_v1
+                )
+                if len(filtered_boxes) > 0:
+                    boxes_back = torch.zeros(len(filtered_boxes), 4)
+                    boxes_back[:, 0] = ((filtered_boxes[:, 0] + filtered_boxes[:, 2]) / 2) / W_b
+                    boxes_back[:, 1] = ((filtered_boxes[:, 1] + filtered_boxes[:, 3]) / 2) / H_b
+                    boxes_back[:, 2] = (filtered_boxes[:, 2] - filtered_boxes[:, 0]) / W_b
+                    boxes_back[:, 3] = (filtered_boxes[:, 3] - filtered_boxes[:, 1]) / H_b
+                    boxes = boxes_back
+                    labels = filtered_phrases
+            except:
+                pass
+
+        # SAM
+        if len(boxes) > 0:
+            masks, boxes_xyxy = run_sam_segmentation(predictor, image_np, boxes)
+            result_img = create_binary_mask_visualization(image_np, masks)
+            detection_img = create_detection_visualization(image_np, boxes_xyxy, labels)
+        else:
+            result_img = image_np.copy()
+            detection_img = image_np.copy()
+
+        results_gallery.append((detection_img, f"{img_file} — Detections"))
+        results_gallery.append((result_img, f"{img_file} — Mask"))
+
+        results_text_lines.append(
+            f"{img_file:<50} {prompt_v1[:28]:<30} {len(boxes):<12}"
+        )
+
+    progress(1.0, desc="✅ Batch complete!")
+
+    summary = "\n".join(results_text_lines)
+    summary += f"\n\n✅ Processed {len(image_files)} images"
+
+    return results_gallery, summary
+
+
+# =====================
+# Gradio UI
+# =====================
+def build_app():
+    """Build the Gradio interface."""
+
+    css = """
+    .gradio-container { max-width: 1200px !important; }
+    .header { text-align: center; margin-bottom: 20px; }
+    """
+
+    with gr.Blocks(
+        title="MAVR-OOD: Multi-Agent Visual Reasoning",
+        theme=gr.themes.Soft(primary_hue="blue", secondary_hue="purple"),
+        css=css,
+    ) as app:
+
+        gr.Markdown("""
+        # 🔍 MAVR-OOD: Multi-Agent Visual Reasoning
+        ### Out-of-Distribution Object Detection in Road Scenes
+        **Pipeline**: LLaVA-7B Agents → GroundingDINO → CLIP Verification → SAM Segmentation
+        """)
+
+        with gr.Tabs():
+            # ==================
+            # Tab 1: Single Image
+            # ==================
+            with gr.TabItem("🖼️ Single Image", id="single"):
+                gr.Markdown("Upload a road scene image. The system will automatically detect anomalous objects.")
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        input_image = gr.Image(
+                            label="Upload Road Scene Image",
+                            type="numpy",
+                            height=350,
+                        )
+                        with gr.Row():
+                            clip_thresh = gr.Slider(
+                                0.05, 0.5, value=0.20, step=0.05,
+                                label="CLIP Threshold",
+                                info="Lower = more detections, Higher = more precise",
+                            )
+                            box_thresh = gr.Slider(
+                                0.1, 0.5, value=0.3, step=0.05,
+                                label="Box Threshold",
+                                info="GroundingDINO confidence threshold",
+                            )
+                        run_single_btn = gr.Button(
+                            "🚀 Run Detection", variant="primary", size="lg"
+                        )
+
+                with gr.Row():
+                    det_output = gr.Image(label="🟩 Bounding Boxes", height=300)
+                    mask_output = gr.Image(label="🎨 SAM Masks", height=300)
+                    binary_output = gr.Image(label="🩷 Final OOD Mask", height=300)
+
+                analysis_output = gr.Textbox(
+                    label="📝 Agent Analysis & Detection Results",
+                    lines=15,
+                    max_lines=30,
+                )
+
+                run_single_btn.click(
+                    fn=process_single_image,
+                    inputs=[input_image, clip_thresh, box_thresh],
+                    outputs=[det_output, mask_output, binary_output, analysis_output],
+                )
+
+            # ==================
+            # Tab 2: Batch Dataset
+            # ==================
+            with gr.TabItem("📁 Batch Dataset", id="batch"):
+                gr.Markdown("Process an entire dataset folder. Default: `./data/challenging_subset`")
+
+                with gr.Row():
+                    dataset_path = gr.Textbox(
+                        value=DEFAULT_DATASET_DIR,
+                        label="Dataset Directory Path",
+                        info="Path to dataset with 'original/' and 'labels/' subfolders",
+                    )
+
+                with gr.Row():
+                    batch_clip_thresh = gr.Slider(
+                        0.05, 0.5, value=0.20, step=0.05,
+                        label="CLIP Threshold",
+                    )
+                    batch_box_thresh = gr.Slider(
+                        0.1, 0.5, value=0.3, step=0.05,
+                        label="Box Threshold",
+                    )
+
+                run_batch_btn = gr.Button(
+                    "🚀 Run Batch Detection", variant="primary", size="lg"
+                )
+
+                batch_gallery = gr.Gallery(
+                    label="📸 Detection Results",
+                    columns=4,
+                    rows=3,
+                    height=500,
+                )
+
+                batch_summary = gr.Textbox(
+                    label="📊 Batch Results Summary",
+                    lines=15,
+                    max_lines=30,
+                )
+
+                run_batch_btn.click(
+                    fn=process_batch,
+                    inputs=[dataset_path, batch_clip_thresh, batch_box_thresh],
+                    outputs=[batch_gallery, batch_summary],
+                )
+
+        gr.Markdown("""
+        ---
+        **MAVR-OOD** | LLaVA-7B + GroundingDINO + CLIP + SAM | Multi-Agent Visual Reasoning for OOD Detection
+        """)
+
+    return app
+
+
+# =====================
+# Entry Point
+# =====================
+if __name__ == "__main__":
+    # Auto-detect Google Colab
+    is_colab = "google.colab" in str(globals().get("get_ipython", lambda: None)())
+    
+    app = build_app()
+    app.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=is_colab,  # Auto-share on Colab for public URL
+        inbrowser=not is_colab,
+    )

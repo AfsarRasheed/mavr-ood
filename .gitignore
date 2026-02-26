@@ -1,28 +1,32 @@
-# Python
+# Model weights (download on Colab)
+weights/
+*.pth
+
+# Python cache
 __pycache__/
 *.pyc
-venv/
+*.pyo
+.eggs/
+*.egg-info/
+
+# Environment
 .env
+.venv/
+venv/
 
-# API Keys
-config.py
-.env*
+# HuggingFace cache
+.cache/
 
-# Large Model Weights
-*.pth
-*.pth.tar
-*.ckpt
-*.onnx
+# Outputs (regenerated on each run)
+outputs/
+
+# IDE
+.vscode/
+.idea/
 
 # OS
 .DS_Store
+Thumbs.db
 
-# Local Installers
-*.deb
-
-# Outputs
-outputs/
-results/
-output/
-ablation/
+# Logs
 *.log

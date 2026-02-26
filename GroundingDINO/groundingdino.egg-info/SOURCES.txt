@@ -2,10 +2,6 @@ LICENSE
 README.md
 pyproject.toml
 setup.py
-/home/jeonghyo/Gaebal/Grounded-Segment-Anything/GroundingDINO/groundingdino/models/GroundingDINO/csrc/cuda_version.cu
-/home/jeonghyo/Gaebal/Grounded-Segment-Anything/GroundingDINO/groundingdino/models/GroundingDINO/csrc/vision.cpp
-/home/jeonghyo/Gaebal/Grounded-Segment-Anything/GroundingDINO/groundingdino/models/GroundingDINO/csrc/MsDeformAttn/ms_deform_attn_cpu.cpp
-/home/jeonghyo/Gaebal/Grounded-Segment-Anything/GroundingDINO/groundingdino/models/GroundingDINO/csrc/MsDeformAttn/ms_deform_attn_cuda.cu
 groundingdino/__init__.py
 groundingdino/version.py
 groundingdino.egg-info/PKG-INFO

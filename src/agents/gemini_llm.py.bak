@@ -1,0 +1,31 @@
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+# Load .env
+load_dotenv()
+
+# Read config
+API_KEY = os.getenv("AIzaSyDwCzjPg-f2rCVluIeTA07hzeoG-b3OeVo")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash-exp")
+TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", 0.2))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", 4096))
+
+# Configure Gemini
+genai.configure(api_key=API_KEY)
+
+model = genai.GenerativeModel(
+    model_name=MODEL_NAME,
+    generation_config={
+        "temperature": TEMPERATURE,
+        "max_output_tokens": MAX_TOKENS,
+    }
+)
+
+def run_gemini(messages):
+    """
+    messages: list of dicts [{"role": "system/user", "content": "..."}]
+    """
+    prompt = "\n".join([m["content"] for m in messages])
+    response = model.generate_content(prompt)
+    return response.text
