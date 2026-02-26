@@ -6,7 +6,7 @@ import google.generativeai as genai
 load_dotenv()
 
 # Read config
-API_KEY = os.getenv("AIzaSyDwCzjPg-f2rCVluIeTA07hzeoG-b3OeVo")
+API_KEY = os.getenv("")
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash-exp")
 TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", 0.2))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", 4096))
