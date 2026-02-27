@@ -14,7 +14,7 @@
 ### Cell 2 — Install Dependencies
 ```python
 !pip install -q -r requirements.txt
-!pip install -q gradio>=4.0.0 addict yapf
+!pip install -q gradio>=4.0.0 addict yapf bitsandbytes>=0.41.0
 !pip install -q -e segment_anything/
 !cd GroundingDINO && pip install -q -e . && cd ..
 print("✅ All dependencies installed!")
