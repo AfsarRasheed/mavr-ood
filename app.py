@@ -557,15 +557,15 @@ def build_app():
     """
 
     with gr.Blocks(
-        title="MAVR-OOD: Multi-Agent Visual Reasoning",
+        title="A Confidence-Aware Multi-Agent Vision-Language System for Reliable Object Localization",
         theme=gr.themes.Soft(primary_hue="blue", secondary_hue="purple"),
         css=css,
     ) as app:
 
         gr.Markdown("""
-        # 🔍 MAVR-OOD: Multi-Agent Visual Reasoning
-        ### Out-of-Distribution Object Detection in Road Scenes
-        **Pipeline**: LLaVA-7B Agents → GroundingDINO → CLIP Verification → SAM Segmentation
+        # A Confidence-Aware Multi-Agent Vision-Language System
+        ### Reliable Object Localization for Out-of-Distribution Detection in Road Scenes
+        **Pipeline**: Multi-Agent Analysis (LLaVA-7B) → Object Grounding (GroundingDINO) → Semantic Verification (CLIP) → Segmentation (SAM)
         """)
 
         with gr.Tabs():
@@ -662,7 +662,7 @@ def build_app():
 
         gr.Markdown("""
         ---
-        **MAVR-OOD** | LLaVA-7B + GroundingDINO + CLIP + SAM | Multi-Agent Visual Reasoning for OOD Detection
+        **Confidence-Aware Multi-Agent VLM System** | LLaVA-7B · GroundingDINO · CLIP · SAM
         """)
 
     return app
