@@ -81,15 +81,38 @@ Return ONLY valid JSON following the required schema.
             return {"error": str(e)}
 
     def _parse_json_response(self, response: str) -> Dict:
+        """Robustly parse JSON from LLaVA output"""
+        import re
         try:
-            if "```" in response:
-                response = response.split("```")[1]
             return json.loads(response)
         except Exception:
-            return {
-                "error": "JSON parsing failed",
-                "raw_response": response
-            }
+            pass
+        code_block = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
+        if code_block:
+            try:
+                return json.loads(code_block.group(1).strip())
+            except Exception:
+                pass
+        brace_start = response.find('{')
+        if brace_start != -1:
+            depth = 0
+            for i in range(brace_start, len(response)):
+                if response[i] == '{': depth += 1
+                elif response[i] == '}': depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(response[brace_start:i+1])
+                    except Exception:
+                        break
+        cleaned = response.strip()
+        cleaned = re.sub(r'^[^{]*', '', cleaned)
+        cleaned = re.sub(r'[^}]*$', '', cleaned)
+        if cleaned:
+            try:
+                return json.loads(cleaned)
+            except Exception:
+                pass
+        return {"error": "JSON parsing failed", "raw_response": response}
 
     def load_json(self, path: str) -> Dict:
         with open(path, "r", encoding="utf-8") as f:
@@ -130,10 +153,10 @@ Return ONLY valid JSON following the required schema.
             print(f"\n📸 Synthesizing {i+1}/{len(common_files)}: {fname}")
 
             combined = {
-                "agent1_scene_context": a1[fname]["scene_context_analysis"],
-                "agent2_spatial_anomaly": a2[fname]["spatial_anomaly_analysis"],
-                "agent3_semantic_inconsistency": a3[fname]["semantic_inconsistency_analysis"],
-                "agent4_visual_appearance": a4[fname]["visual_appearance_analysis"]
+                "agent1_scene_context": a1[fname].get("scene_context_analysis", a1[fname]),
+                "agent2_spatial_anomaly": a2[fname].get("spatial_anomaly_analysis", a2[fname]),
+                "agent3_semantic_inconsistency": a3[fname].get("semantic_inconsistency_analysis", a3[fname]),
+                "agent4_visual_appearance": a4[fname].get("visual_appearance_analysis", a4[fname])
             }
 
             start = time.time()
