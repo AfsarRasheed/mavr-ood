@@ -13,6 +13,28 @@ from torchvision.ops.boxes import nms
 from transformers import BertConfig, BertModel, BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 
+# ============================================================
+# Monkey-patch transformers to fix API change in 5.0+
+# Old API: get_extended_attention_mask(mask, shape, device)
+# New API: get_extended_attention_mask(mask, shape, dtype)
+# GroundingDINO calls with device, but transformers 5.0 expects dtype.
+# This patch makes it work with BOTH calling conventions.
+# ============================================================
+import transformers
+_orig_get_ext_mask = getattr(transformers.PreTrainedModel, 'get_extended_attention_mask', None)
+if _orig_get_ext_mask is not None:
+    def _safe_get_extended_attention_mask(self, attention_mask, input_shape, device_or_dtype=None):
+        if attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong attention_mask shape: {attention_mask.shape}")
+        extended = extended.to(dtype=torch.float32)
+        extended = (1.0 - extended) * torch.finfo(torch.float32).min
+        return extended
+    transformers.PreTrainedModel.get_extended_attention_mask = _safe_get_extended_attention_mask
+
 
 class BertModelWarper(nn.Module):
     def __init__(self, bert_model):
