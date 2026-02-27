@@ -121,6 +121,46 @@ for r in results:
 
 ---
 
+## Phase 2C: Full Road Anomaly Dataset (All 21 images ~50-60 min)
+
+> Use this if you want to evaluate on the complete dataset instead of just the 13-image challenging subset.
+
+### Cell 5C — Run All Agents on Full Road Anomaly Dataset
+```python
+!python src/agents/run_all_agents.py \
+    --image_dir ./datasets/RoadAnomaly/original \
+    --output_dir ./outputs/road_anomaly_full_prompts \
+    --delay 2
+```
+
+### Cell 6C — Evaluate Full Road Anomaly Dataset
+```python
+!python run_evaluate.py \
+    --config GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py \
+    --grounded_checkpoint weights/groundingdino_swint_ogc.pth \
+    --sam_checkpoint weights/sam_vit_h_4b8939.pth \
+    --dataset_dir ./datasets/RoadAnomaly \
+    --dataset_type road_anomaly \
+    --multiagent_prompts ./outputs/road_anomaly_full_prompts/agent5_final_synthesis_results.json \
+    --output_dir ./outputs/road_anomaly_full_results \
+    --clip_threshold 0.20 \
+    --device cuda
+```
+
+### Cell 7C — View Full Dataset Results
+```python
+from IPython.display import display, Image as IPImage
+import glob, os
+
+results = sorted(glob.glob("outputs/road_anomaly_full_results/*.jpg"))
+print(f"📊 Found {len(results)} result images\n")
+for r in results:
+    print(f"\n📷 {os.path.basename(r)}")
+    display(IPImage(r, width=600))
+```
+
+---
+
 ## Phase 3: Gradio App (Optional)
 
 ### Cell 9 — Launch Gradio App
