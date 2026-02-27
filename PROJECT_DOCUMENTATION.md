@@ -1,4 +1,4 @@
-# MAVR-OOD: Multi-Agent Visual Reasoning for Out-of-Distribution Object Detection
+# MAVR-OOD: Multi-Agent Vision-Language Reasoning for Out-of-Distribution Object Detection
 
 ## Complete Project Documentation
 
