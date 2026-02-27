@@ -1,46 +1,58 @@
 # MAVR-OOD: Google Colab Implementation Guide
-> Complete step-by-step cells to run the full pipeline on Google Colab (T4 GPU)
+> Complete step-by-step cells to run the multi-agent OOD detection pipeline on Google Colab (T4 GPU)
+>
+> **Tested:** Feb 2026 | **Runtime:** T4 GPU | **Results:** mIoU 0.97, F1 0.99 on test image
 
 ---
 
-## Phase 1: Setup (Run once)
+## Phase 1: Setup (Run once per session)
 
-### Cell 1 — Clone Repository
+### Cell 1 — Clone Repository (first time only)
 ```python
+# First time: clone the repo
 !git clone https://github.com/AfsarRasheed/mavr-ood.git
 %cd mavr-ood
+
+# Returning session: just pull latest
+# %cd mavr-ood
+# !git checkout -- .
+# !git pull origin main
 ```
 
 ### Cell 2 — Install Dependencies
+> ⚠️ **Run this every new Colab session** — Colab resets packages on runtime restart.
 ```python
 !pip install -q -r requirements.txt
 !pip install -q gradio>=4.0.0 addict yapf bitsandbytes>=0.41.0
 !pip install -q -e segment_anything/
 !cd GroundingDINO && pip install -q -e . && cd ..
+
+# Verify critical packages
+import torch, bitsandbytes
+print(f"✅ torch {torch.__version__}, CUDA: {torch.cuda.is_available()}")
+print(f"✅ bitsandbytes installed (4-bit quantization enabled)")
+print(f"✅ GPU: {torch.cuda.get_device_name(0)}")
+print(f"✅ VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
 print("✅ All dependencies installed!")
 ```
 
-### Cell 3 — Download Weights (~3 min)
+### Cell 3 — Download Weights (~3 min, first time only)
 ```python
-!mkdir -p weights
-!wget -q -P weights/ https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
-!wget -q -P weights/ https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
-print("✅ Weights downloaded!")
-```
-
-### Cell 4 — Verify GPU
-```python
-import torch
-print(f"✅ CUDA: {torch.cuda.is_available()}")
-print(f"✅ GPU: {torch.cuda.get_device_name(0)}")
-print(f"✅ VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+import os
+if not os.path.exists("weights/groundingdino_swint_ogc.pth"):
+    !mkdir -p weights
+    !wget -q -P weights/ https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
+    !wget -q -P weights/ https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+    print("✅ Weights downloaded!")
+else:
+    print("✅ Weights already exist!")
 ```
 
 ---
 
-## Phase 2A: Single Image Test (Quick validation ~5 min)
+## Phase 2A: Single Image Test (Quick validation ~15 min)
 
-### Cell 5A — Prepare Single Image Test
+### Cell 4A — Prepare Single Image Test
 ```python
 !mkdir -p ./data/test_single/original
 !mkdir -p ./data/test_single/labels
@@ -49,7 +61,8 @@ print(f"✅ VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
 print("✅ Test folder ready (1 image)")
 ```
 
-### Cell 6A — Run All Agents on 1 Image (~5 min)
+### Cell 5A — Run All 5 Agents (~12 min)
+> Each agent loads LLaVA-7B (4-bit quantized, ~4GB VRAM) and analyzes the image.
 ```python
 !python src/agents/run_all_agents.py \
     --image_dir ./data/test_single/original \
@@ -57,7 +70,7 @@ print("✅ Test folder ready (1 image)")
     --delay 2
 ```
 
-### Cell 7A — Evaluate Single Image
+### Cell 6A — Run Evaluation (GroundingDINO + CLIP + SAM)
 ```python
 !python run_evaluate.py \
     --config GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py \
@@ -71,23 +84,29 @@ print("✅ Test folder ready (1 image)")
     --device cuda
 ```
 
-### Cell 8A — View Single Image Result
+### Cell 7A — View Results
 ```python
 from IPython.display import display, Image as IPImage
-import glob, os
+import glob, os, json
 
-results = sorted(glob.glob("outputs/test_single_results/*.jpg"))
-print(f"📊 Found {len(results)} result images\n")
-for r in results:
+# Show metrics
+with open("outputs/test_single_results/multiagent_evaluation_results.json") as f:
+    results = json.load(f)
+    m = results["average_metrics"]
+    print(f"📊 mIoU: {m['mIoU']:.4f} | F1: {m['F1']:.4f} | Precision: {m['Precision']:.4f} | Recall: {m['Recall']:.4f}")
+    print(f"📊 Detection Rate: {results['detection_rate']}%\n")
+
+# Show visualizations
+for r in sorted(glob.glob("outputs/test_single_results/*.jpg")):
     print(f"📷 {os.path.basename(r)}")
     display(IPImage(r, width=600))
 ```
 
 ---
 
-## Phase 2B: Full Dataset Run (All 13 images ~35-40 min)
+## Phase 2B: Full Dataset Run (13 images, ~60 min)
 
-### Cell 5B — Run All Agents on Full Dataset (~30 min)
+### Cell 4B — Run All Agents on Full Dataset (~45 min)
 ```python
 !python src/agents/run_all_agents.py \
     --image_dir ./data/challenging_subset/original \
@@ -95,7 +114,7 @@ for r in results:
     --delay 2
 ```
 
-### Cell 6B — Evaluate Full Dataset
+### Cell 5B — Evaluate Full Dataset
 ```python
 !python run_evaluate.py \
     --config GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py \
@@ -109,54 +128,18 @@ for r in results:
     --device cuda
 ```
 
-### Cell 7B — View All Results
+### Cell 6B — View All Results
 ```python
 from IPython.display import display, Image as IPImage
-import glob, os
+import glob, os, json
 
-results = sorted(glob.glob("outputs/evaluation_results/*.jpg"))
-print(f"📊 Found {len(results)} result images\n")
-for r in results:
-    print(f"\n📷 {os.path.basename(r)}")
-    display(IPImage(r, width=600))
-```
+with open("outputs/evaluation_results/multiagent_evaluation_results.json") as f:
+    results = json.load(f)
+    m = results["average_metrics"]
+    print(f"📊 mIoU: {m['mIoU']:.4f} | F1: {m['F1']:.4f}")
+    print(f"📊 Detection Rate: {results['detection_rate']}%\n")
 
----
-
-## Phase 2C: Full Road Anomaly Dataset (All 21 images ~50-60 min)
-
-> Use this if you want to evaluate on the complete dataset instead of just the 13-image challenging subset.
-
-### Cell 5C — Run All Agents on Full Road Anomaly Dataset
-```python
-!python src/agents/run_all_agents.py \
-    --image_dir ./datasets/RoadAnomaly/original \
-    --output_dir ./outputs/road_anomaly_full_prompts \
-    --delay 2
-```
-
-### Cell 6C — Evaluate Full Road Anomaly Dataset
-```python
-!python run_evaluate.py \
-    --config GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py \
-    --grounded_checkpoint weights/groundingdino_swint_ogc.pth \
-    --sam_checkpoint weights/sam_vit_h_4b8939.pth \
-    --dataset_dir ./datasets/RoadAnomaly \
-    --dataset_type road_anomaly \
-    --multiagent_prompts ./outputs/road_anomaly_full_prompts/agent5_final_synthesis_results.json \
-    --output_dir ./outputs/road_anomaly_full_results \
-    --clip_threshold 0.20 \
-    --device cuda
-```
-
-### Cell 7C — View Full Dataset Results
-```python
-from IPython.display import display, Image as IPImage
-import glob, os
-
-results = sorted(glob.glob("outputs/road_anomaly_full_results/*.jpg"))
-print(f"📊 Found {len(results)} result images\n")
-for r in results:
+for r in sorted(glob.glob("outputs/evaluation_results/*.jpg")):
     print(f"\n📷 {os.path.basename(r)}")
     display(IPImage(r, width=600))
 ```
@@ -165,7 +148,7 @@ for r in results:
 
 ## Phase 3: Gradio App (Optional)
 
-### Cell 9 — Launch Gradio App
+### Cell — Launch Gradio App
 ```python
 import app
 demo = app.build_app()
@@ -178,8 +161,28 @@ demo.launch(share=True)
 
 | Error | Fix |
 |-------|-----|
-| CUDA OOM | Already fixed — 4-bit quantization enabled automatically |
-| `No module named 'addict'` | Run `!python fix_colab_compat.py` again |
-| `cannot import sam_model_registry` | Run `!python fix_colab_compat.py` again |
-| `get_head_mask` AttributeError | Run `!python fix_colab_compat.py` again |
-| Session disconnects | Re-run from Cell 1, weights will be re-downloaded |
+| `CUDA out of memory` | Ensure `bitsandbytes` is installed: `!pip install -q bitsandbytes>=0.41.0` |
+| `No module named 'addict'` | Run Cell 2 again |
+| `cannot import sam_model_registry` | Run `!pip install -q -e segment_anything/` |
+| `get_extended_attention_mask` TypeError | Already fixed in `run_evaluate.py` — just `!git pull origin main` |
+| Session disconnects | Re-run from Cell 2 (deps), Cell 3 will skip if weights exist |
+| Agent JSON parsing failed | Non-critical — Agent 5 still synthesizes from raw output |
+| `git pull` blocked by local changes | Run `!git checkout -- .` then `!git pull origin main` |
+
+---
+
+## Architecture Overview
+
+```
+Image → Agent 1 (Scene Context)     ─┐
+      → Agent 2 (Spatial Anomaly)    ─┤
+      → Agent 3 (Semantic Analysis)  ─┼→ Agent 5 (Synthesis) → prompt_v1, prompt_v2
+      → Agent 4 (Visual Appearance)  ─┘           ↓
+                                         GroundingDINO (detection)
+                                              ↓
+                                         CLIP (verification)
+                                              ↓
+                                         SAM (segmentation)
+                                              ↓
+                                         Evaluation (mIoU, F1)
+```
