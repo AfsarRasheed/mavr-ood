@@ -24,9 +24,62 @@ class BertModelWarper(nn.Module):
         self.encoder = bert_model.encoder
         self.pooler = bert_model.pooler
 
-        self.get_extended_attention_mask = bert_model.get_extended_attention_mask
-        self.invert_attention_mask = bert_model.invert_attention_mask
-        self.get_head_mask = bert_model.get_head_mask
+        # Compatibility: these methods were removed in transformers 5.0+
+        # Provide inline fallbacks if they don't exist on the model
+        if hasattr(bert_model, 'get_extended_attention_mask'):
+            self.get_extended_attention_mask = bert_model.get_extended_attention_mask
+        else:
+            self.get_extended_attention_mask = self._compat_get_extended_attention_mask
+
+        if hasattr(bert_model, 'invert_attention_mask'):
+            self.invert_attention_mask = bert_model.invert_attention_mask
+        else:
+            self.invert_attention_mask = self._compat_invert_attention_mask
+
+        if hasattr(bert_model, 'get_head_mask'):
+            self.get_head_mask = bert_model.get_head_mask
+        else:
+            self.get_head_mask = self._compat_get_head_mask
+
+    def _compat_get_extended_attention_mask(self, attention_mask, input_shape, device=None):
+        """Fallback for transformers 5.0+ where this method was removed from BertModel."""
+        if attention_mask.dim() == 3:
+            extended_attention_mask = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended_attention_mask = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong shape for attention_mask (shape {attention_mask.shape})")
+        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+        return extended_attention_mask
+
+    def _compat_invert_attention_mask(self, encoder_attention_mask):
+        """Fallback for transformers 5.0+ where this method was removed from BertModel."""
+        if encoder_attention_mask.dim() == 3:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, :, :]
+        elif encoder_attention_mask.dim() == 2:
+            encoder_extended_attention_mask = encoder_attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong shape for encoder_attention_mask (shape {encoder_attention_mask.shape})")
+        encoder_extended_attention_mask = encoder_extended_attention_mask.to(dtype=torch.float32)
+        encoder_extended_attention_mask = (1.0 - encoder_extended_attention_mask) * -10000.0
+        return encoder_extended_attention_mask
+
+    def _compat_get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
+        """Fallback for transformers 5.0+ where this method was removed from BertModel."""
+        if head_mask is not None:
+            head_mask = self._convert_head_mask_to_5d(head_mask, num_hidden_layers)
+        else:
+            head_mask = [None] * num_hidden_layers
+        return head_mask
+
+    def _convert_head_mask_to_5d(self, head_mask, num_hidden_layers):
+        if head_mask.dim() == 1:
+            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+        elif head_mask.dim() == 2:
+            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+        return head_mask
 
     def forward(
         self,
