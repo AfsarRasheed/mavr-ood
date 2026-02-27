@@ -319,8 +319,8 @@ class DatasetFactory:
 def test_segment_me_datasets():
     """Test Segment Me datasets"""
     dataset_paths = [
-        "/home/jeonghyo/Gaebal/Datasets/segment_me_val/dataset_AnomalyTrack",
-        "/home/jeonghyo/Gaebal/Datasets/segment_me_val/dataset_ObstacleTrack"
+        "./data/segment_me_val/dataset_AnomalyTrack",
+        "./data/segment_me_val/dataset_ObstacleTrack"
     ]
     
     for dataset_dir in dataset_paths:
