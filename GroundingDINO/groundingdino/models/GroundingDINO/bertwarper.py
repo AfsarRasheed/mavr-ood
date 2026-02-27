@@ -24,22 +24,12 @@ class BertModelWarper(nn.Module):
         self.encoder = bert_model.encoder
         self.pooler = bert_model.pooler
 
-        # Compatibility: these methods were removed in transformers 5.0+
-        # Provide inline fallbacks if they don't exist on the model
-        if hasattr(bert_model, 'get_extended_attention_mask'):
-            self.get_extended_attention_mask = bert_model.get_extended_attention_mask
-        else:
-            self.get_extended_attention_mask = self._compat_get_extended_attention_mask
-
-        if hasattr(bert_model, 'invert_attention_mask'):
-            self.invert_attention_mask = bert_model.invert_attention_mask
-        else:
-            self.invert_attention_mask = self._compat_invert_attention_mask
-
-        if hasattr(bert_model, 'get_head_mask'):
-            self.get_head_mask = bert_model.get_head_mask
-        else:
-            self.get_head_mask = self._compat_get_head_mask
+        # Always use our own compat implementations.
+        # In transformers 5.0+ the original methods either don't exist or have
+        # changed signatures (e.g. device→dtype), so we can't rely on hasattr.
+        self.get_extended_attention_mask = self._compat_get_extended_attention_mask
+        self.invert_attention_mask = self._compat_invert_attention_mask
+        self.get_head_mask = self._compat_get_head_mask
 
     def _compat_get_extended_attention_mask(self, attention_mask, input_shape, device=None):
         """Fallback for transformers 5.0+ where this method was removed from BertModel."""
