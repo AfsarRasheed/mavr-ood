@@ -11,11 +11,13 @@
 %cd mavr-ood
 ```
 
-### Cell 2 — Install Dependencies + Fix Compatibility
+### Cell 2 — Install Dependencies
 ```python
-!pip install -r requirements.txt
-!pip install gradio>=4.0.0
-!python fix_colab_compat.py
+!pip install -q -r requirements.txt
+!pip install -q gradio>=4.0.0 addict yapf
+!pip install -q -e segment_anything/
+!cd GroundingDINO && pip install -q -e . && cd ..
+print("✅ All dependencies installed!")
 ```
 
 ### Cell 3 — Download Weights (~3 min)
