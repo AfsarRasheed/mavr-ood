@@ -1,4 +1,4 @@
-# Multi-Agent Vision-Language Reasoning for Out-of-Distribution Detection in Complex Road Environments
+# Multi-Agent Vision-Language Reasoning for Reliable Out-of-Distribution Object Localization in Road Environments
 
 
 ## Abstract
