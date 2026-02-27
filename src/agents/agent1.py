@@ -103,6 +103,9 @@ class SceneContextAnalyzer:
         """Robustly parse JSON from LLaVA output"""
         import re
 
+        # Pre-clean: Fix LLaVA's LaTeX-style escaped underscores (\_  ->  _)
+        response = response.replace("\\_", "_")
+
         # Strategy 1: Try direct parse
         try:
             return json.loads(response)

@@ -96,6 +96,8 @@ class VisualAppearanceEvaluator:
     def _parse_json_response(self, response: str) -> Dict:
         """Robustly parse JSON from LLaVA output"""
         import re
+        # Pre-clean: Fix LLaVA's LaTeX-style escaped underscores
+        response = response.replace("\\_", "_")
         try:
             return json.loads(response)
         except Exception:
