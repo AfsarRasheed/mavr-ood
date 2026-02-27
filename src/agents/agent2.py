@@ -124,6 +124,21 @@ class SpatialAnomalyDetector:
                 return json.loads(cleaned)
             except Exception:
                 pass
+        # Strategy 5: Truncated JSON recovery — close unfinished JSON
+        if brace_start is not None and brace_start != -1:
+            truncated = response[brace_start:]
+            # Remove trailing incomplete string (cut mid-value)
+            truncated = re.sub(r',\s*"[^"]*$', '', truncated)
+            truncated = re.sub(r':\s*"[^"]*$', ': ""', truncated)
+            # Count open braces/brackets and close them
+            open_braces = truncated.count('{') - truncated.count('}')
+            open_brackets = truncated.count('[') - truncated.count(']')
+            truncated += ']' * max(0, open_brackets)
+            truncated += '}' * max(0, open_braces)
+            try:
+                return json.loads(truncated)
+            except Exception:
+                pass
         return {"error": "JSON parsing failed", "raw_response": response}
 
     def process_batch(self, image_directory: str, output_file: str):

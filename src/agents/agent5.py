@@ -26,16 +26,27 @@ from src.agents.vlm_backend import run_vlm
 # SYSTEM PROMPT
 # =========================
 REASONING_SYNTHESIZER_SYSTEM_PROMPT = """
-You are a Reasoning Synthesizer responsible for integrating multi-agent findings
-into coherent final judgments and generating optimized prompts for GroundedSAM.
+You are a Reasoning Synthesizer. Integrate multi-agent findings and generate
+optimized prompts for GroundedSAM object detection.
 
-CRITICAL PROMPT RULES:
-- V1: EXACTLY adjective + noun
-- V2: EXACTLY single noun
+CRITICAL RULES:
+- prompt_v1: EXACTLY "adjective noun" (e.g. "wild zebras", "stray dog")
+- prompt_v2: EXACTLY one noun (e.g. "zebras", "dog")
 - Choose ONLY the TOP 1 most anomalous object
 - Priority: Animals > Misplaced vehicles > Obstacles > Others
 
-OUTPUT JSON ONLY.
+You MUST output ONLY this exact JSON structure:
+{
+    "grounded_sam_prompts": {
+        "prompt_v1": "adjective noun",
+        "prompt_v2": "noun"
+    },
+    "overall_confidence": 0.0,
+    "anomaly_type": "type",
+    "reasoning": "brief explanation"
+}
+
+OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
 """
 
 
@@ -112,6 +123,19 @@ Return ONLY valid JSON following the required schema.
         if cleaned:
             try:
                 return json.loads(cleaned)
+            except Exception:
+                pass
+        # Strategy 5: Truncated JSON recovery — close unfinished JSON
+        if brace_start is not None and brace_start != -1:
+            truncated = response[brace_start:]
+            truncated = re.sub(r',\s*"[^"]*$', '', truncated)
+            truncated = re.sub(r':\s*"[^"]*$', ': ""', truncated)
+            open_braces = truncated.count('{') - truncated.count('}')
+            open_brackets = truncated.count('[') - truncated.count(']')
+            truncated += ']' * max(0, open_brackets)
+            truncated += '}' * max(0, open_braces)
+            try:
+                return json.loads(truncated)
             except Exception:
                 pass
         return {"error": "JSON parsing failed", "raw_response": response}
