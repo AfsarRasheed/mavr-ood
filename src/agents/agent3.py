@@ -99,15 +99,38 @@ class SemanticInconsistencyAnalyzer:
             return {"error": str(e)}
 
     def _parse_json_response(self, response: str) -> Dict:
+        """Robustly parse JSON from LLaVA output"""
+        import re
         try:
-            if "```" in response:
-                response = response.split("```")[1]
             return json.loads(response)
         except Exception:
-            return {
-                "error": "JSON parsing failed",
-                "raw_response": response
-            }
+            pass
+        code_block = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
+        if code_block:
+            try:
+                return json.loads(code_block.group(1).strip())
+            except Exception:
+                pass
+        brace_start = response.find('{')
+        if brace_start != -1:
+            depth = 0
+            for i in range(brace_start, len(response)):
+                if response[i] == '{': depth += 1
+                elif response[i] == '}': depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(response[brace_start:i+1])
+                    except Exception:
+                        break
+        cleaned = response.strip()
+        cleaned = re.sub(r'^[^{]*', '', cleaned)
+        cleaned = re.sub(r'[^}]*$', '', cleaned)
+        if cleaned:
+            try:
+                return json.loads(cleaned)
+            except Exception:
+                pass
+        return {"error": "JSON parsing failed", "raw_response": response}
 
     def process_batch(self, image_directory: str, output_file: str):
         image_files = [
