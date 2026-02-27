@@ -1,7 +1,7 @@
 # Configuration for Cog ⚙️
 # Reference: https://github.com/replicate/cog/blob/main/docs/yaml.md
 
-build:
+build:1
   gpu: true
   cuda: "11.7"
   system_packages:
