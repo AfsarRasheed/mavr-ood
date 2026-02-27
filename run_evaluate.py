@@ -11,6 +11,27 @@ from PIL import Image
 from itertools import product
 import copy
 
+# ============================================================
+# CRITICAL: Monkey-patch transformers BEFORE importing GroundingDINO
+# transformers 5.0 changed get_extended_attention_mask(mask, shape, device)
+# to get_extended_attention_mask(mask, shape, dtype). GroundingDINO passes
+# device, causing TypeError. This makes it work with both.
+# ============================================================
+import transformers
+_orig_fn = getattr(transformers.PreTrainedModel, 'get_extended_attention_mask', None)
+if _orig_fn is not None:
+    def _safe_get_extended_attention_mask(self, attention_mask, input_shape, device_or_dtype=None):
+        if attention_mask.dim() == 3:
+            extended = attention_mask[:, None, :, :]
+        elif attention_mask.dim() == 2:
+            extended = attention_mask[:, None, None, :]
+        else:
+            raise ValueError(f"Wrong attention_mask shape: {attention_mask.shape}")
+        extended = extended.to(dtype=torch.float32)
+        extended = (1.0 - extended) * torch.finfo(torch.float32).min
+        return extended
+    transformers.PreTrainedModel.get_extended_attention_mask = _safe_get_extended_attention_mask
+
 sys.path.append(os.path.join(os.getcwd(), "GroundingDINO"))
 sys.path.append(os.path.join(os.getcwd(), "segment_anything"))
 
