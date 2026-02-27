@@ -1,10 +1,5 @@
 # Multi-Agent Visual Reasoning for Out-of-Distribution Detection in Complex Road Environments
-IEEE Access 2025
 
-<!-- [Paper (IEEE Access)] | [ArXiv (TBD)] | [Project Page (TBD)]
-
----
--->
 
 ## Abstract
 
@@ -25,8 +20,8 @@ To address these fundamental limitations, we propose a novel multi-agent visual 
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/SongJeongHyo/MAVR-OOD.git
-    cd MAVR-OOD
+    git clone https://github.com/AfsarRasheed/mavr-ood.git
+    cd mavr-ood
 
     ```
 
@@ -124,19 +119,3 @@ python run_evaluation.py \
 ```
 --clip_threshold: CLIP semantic verification threshold (set to 0.0 to disable).
 Results, logs, and visualizations will be saved in ./outputs/evaluation_results.
-
-## Citation
-
-```Bash
-
-@article{song2025multi,
-  title={Multi-Agent Visual Reasoning for Out-of-Distribution Detection in Complex Road Environments},
-  author={Song, Jeonghyo and Yun, Kimin and Jo, Dae Ung and Kim, Jinyoung and Yoo, Youngjoon},
-  journal={IEEE Access},
-  volume={13},
-  pages={188198--188216},
-  year={2025},
-  publisher={IEEE}
-}
-
-```
