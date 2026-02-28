@@ -433,10 +433,11 @@ def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device
                 boxes_processed[i][2:] += boxes_processed[i][:2]
             
             boxes_processed = boxes_processed.cpu()
+            clip_scores_batch = None
 
             # CLIP verification: filter detections before SAM
             if clip_verifier is not None:
-                boxes_processed, pred_phrases, clip_scores, _ = clip_verifier.verify_detections(
+                boxes_processed, pred_phrases, clip_scores_batch, _ = clip_verifier.verify_detections(
                     image_cv, boxes_processed, pred_phrases, text_prompt
                 )
                 if len(boxes_processed) == 0:
@@ -487,7 +488,8 @@ def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device
                     'phrases': pred_phrases,
                     'scores': scores,
                     'logits': logits,
-                    'combined_scores': combined_scores
+                    'combined_scores': combined_scores,
+                    'clip_scores': clip_scores_batch
                 }
                 
         except Exception as e:
@@ -568,6 +570,7 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
             all_boxes = []
             all_phrases = []
             all_scores = []
+            all_clip_scores = []
             
             # add V1 result
             if best_results_v1 is not None:
@@ -577,6 +580,11 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                 combined_mask = np.logical_or(combined_mask, v1_mask)
                 all_boxes.extend(best_results_v1['boxes'])
                 all_phrases.extend([f"V1:{p}" for p in best_results_v1['phrases']])
+                if 'clip_scores' in best_results_v1 and best_results_v1['clip_scores'] is not None:
+                    if isinstance(best_results_v1['clip_scores'], torch.Tensor):
+                        all_clip_scores.extend(best_results_v1['clip_scores'].cpu().tolist())
+                    else:
+                        all_clip_scores.extend(best_results_v1['clip_scores'])
                 
                 threshold_stats['box_thresholds_v1'].append(best_thresholds_v1['box_threshold'])
                 threshold_stats['text_thresholds_v1'].append(best_thresholds_v1['text_threshold'])
@@ -589,6 +597,11 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                 combined_mask = np.logical_or(combined_mask, v2_mask)
                 all_boxes.extend(best_results_v2['boxes'])
                 all_phrases.extend([f"V2:{p}" for p in best_results_v2['phrases']])
+                if 'clip_scores' in best_results_v2 and best_results_v2['clip_scores'] is not None:
+                    if isinstance(best_results_v2['clip_scores'], torch.Tensor):
+                        all_clip_scores.extend(best_results_v2['clip_scores'].cpu().tolist())
+                    else:
+                        all_clip_scores.extend(best_results_v2['clip_scores'])
                 
                 threshold_stats['box_thresholds_v2'].append(best_thresholds_v2['box_threshold'])
                 threshold_stats['text_thresholds_v2'].append(best_thresholds_v2['text_threshold'])
@@ -604,9 +617,15 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
             )
             
             if final_metrics is not None:
+                if all_clip_scores:
+                    final_metrics['CLIP_Score'] = float(np.mean(all_clip_scores))
+                else:
+                    final_metrics['CLIP_Score'] = 0.0
+                    
                 all_metrics.append(final_metrics)
                 
-                print(f"✓ {image_name}: F1={final_metrics['F1']:.4f}, IoU={final_metrics['mIoU']:.4f}")
+                clip_str = f", CLIP={final_metrics['CLIP_Score']:.4f}" if final_metrics['CLIP_Score'] > 0 else ""
+                print(f"✓ {image_name}: F1={final_metrics['F1']:.4f}, IoU={final_metrics['mIoU']:.4f}{clip_str}")
                 
                 per_image_results.append({
                     'image_name': image_name,
@@ -732,7 +751,7 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
     
     print(f"\nAverage Metrics (including failures as 0):")
     # print basic metrics
-    basic_metrics = ['mIoU', 'F1', 'Precision', 'Recall']
+    basic_metrics = ['mIoU', 'F1', 'Precision', 'Recall', 'CLIP_Score']
     for metric_name in basic_metrics:
         if metric_name in avg_metrics:
             print(f"  {metric_name}: {avg_metrics[metric_name]:.4f}")
