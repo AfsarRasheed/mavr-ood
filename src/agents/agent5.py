@@ -38,12 +38,12 @@ CRITICAL RULES:
 You MUST output ONLY this exact JSON structure:
 {
     "grounded_sam_prompts": {
-        "prompt_v1": "adjective noun",
-        "prompt_v2": "noun"
+        "prompt_v1": "write the adjective and noun here",
+        "prompt_v2": "write only the noun here"
     },
     "overall_confidence": 0.0,
-    "anomaly_type": "type",
-    "reasoning": "brief explanation"
+    "anomaly_type": "write the anomaly type",
+    "reasoning": "write the reasoning here"
 }
 
 OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
