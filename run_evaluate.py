@@ -763,8 +763,6 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
         print(f"\nScore-based Metrics:")
         for metric_name in score_metrics_available:
             print(f"  {metric_name}: {avg_metrics[metric_name]:.4f}")
-    else:
-        print(f"\nScore-based Metrics: Not available (no confidence scores computed)")
     
     # print threshold analysis
     print(f"\nThreshold Analysis:")
