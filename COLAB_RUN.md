@@ -179,14 +179,29 @@ for r in sorted(glob.glob("outputs/evaluation_results/*.jpg")):
 
 ---
 
-## Phase 3: Gradio App (Optional)
+## Phase 3: Web App (Optional — choose one)
 
-### Cell — Launch Gradio App
+### Option A — Gradio App
 ```python
 import app
 demo = app.build_app()
 demo.launch(share=True)
 ```
+
+### Option B — Streamlit App
+```python
+!pip install -q streamlit pyngrok
+```
+```python
+# Cell 1: Start Streamlit server
+!nohup streamlit run streamlit_app.py --server.port 8501 --server.headless true &
+
+# Cell 2: Create public URL
+from pyngrok import ngrok
+url = ngrok.connect(8501)
+print(f"🌐 Open Streamlit app: {url}")
+```
+> **Note:** Streamlit includes ground truth mask upload for computing metrics (mIoU, F1) directly in the UI.
 
 ---
 
