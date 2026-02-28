@@ -30,25 +30,23 @@ You are a Reasoning Synthesizer. Integrate multi-agent findings and generate
 optimized prompts for GroundedSAM object detection.
 
 CRITICAL RULES:
-- prompt_v1: EXACTLY an adjective and a noun (e.g. "wild zebras", "stray dog")
+- prompt_v1: EXACTLY "adjective noun" (e.g. "wild zebras", "stray dog")
 - prompt_v2: EXACTLY one noun (e.g. "zebras", "dog")
 - Choose ONLY the TOP 1 most anomalous object
 - Priority: Animals > Misplaced vehicles > Obstacles > Others
 
-EXAMPLE OUTPUT (If you see a dog on the road):
+You MUST output ONLY this exact JSON structure:
 {
     "grounded_sam_prompts": {
-        "prompt_v1": "stray dog",
-        "prompt_v2": "dog"
+        "prompt_v1": "adjective noun",
+        "prompt_v2": "noun"
     },
-    "overall_confidence": 0.95,
-    "anomaly_type": "animal",
-    "anomaly_reasoning": "A dog is detected on the active roadway. This is unexpected because...",
-    "reasoning": "A dog is detected on the active roadway, which poses a severe collision hazard..."
+    "overall_confidence": 0.0,
+    "anomaly_type": "type",
+    "reasoning": "brief explanation"
 }
 
-Generate the exact JSON structure above for the CURRENT image based on the provided analysis.
-OUTPUT ONLY THE JSON. NO OTHER TEXT.
+OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
 """
 
 
