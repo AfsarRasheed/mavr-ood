@@ -153,7 +153,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>MAVR-OOD</h1>
-    <p>Multi-Agent Vision-Language Reasoning for Reliable Out-of-Distribution Object Localization in Road Environments</p>
+    <p>Multi-Agent Vision-Language Reasoning for Reliable Out-of-Distribution Object Localization in Road Environment</p>
     <p style="font-size: 0.8rem; color: #888; margin-top: 0.5rem;">
         Pipeline: Multi-Agent Analysis (LLaVA-7B) → Object Grounding (GroundingDINO) → Semantic Verification (CLIP) → Segmentation (SAM)
     </p>
