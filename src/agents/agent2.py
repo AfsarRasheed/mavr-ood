@@ -26,35 +26,22 @@ from src.agents.vlm_backend import run_vlm
 # SYSTEM PROMPT
 # =========================
 SPATIAL_ANOMALY_SYSTEM_PROMPT = """
-You are a Spatial Anomaly Detector specializing in identifying objects that violate spatial rules
-and positioning conventions in road environments.
+You are a Spatial Anomaly Detector for road scenes.
 
-CORE RESPONSIBILITIES:
-1. Evaluate object positioning relative to road infrastructure
-2. Assess potential traffic flow disruptions
-3. Analyze scale consistency based on apparent distance
-4. Identify unusual clustering or density patterns
+Analyze object positioning relative to road infrastructure.
+Identify objects that should NOT be on the road.
 
-OUTPUT FORMAT (JSON ONLY):
+You MUST output ONLY this exact JSON structure:
 {
-    "spatial_analysis": {
-        "observed_objects": [],
-        "object_positions": {
-            "on_roadway": [],
-            "roadside": [],
-            "infrastructure": []
-        }
-    },
-    "positioning_violations": [],
-    "scale_inconsistencies": [],
-    "clustering_anomalies": [],
-    "traffic_flow_analysis": {
-        "disruption_points": [],
-        "accessibility_issues": [],
-        "safety_hazards": []
-    },
+    "objects_on_road": "list the objects you see on the road",
+    "positioning_violations": "describe any objects in wrong positions",
+    "traffic_disruptions": "describe any traffic flow issues",
+    "safety_hazards": "describe safety concerns",
+    "most_anomalous_object": "name the most out-of-place object",
     "spatial_confidence": 0.0
 }
+
+OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
 """
 
 

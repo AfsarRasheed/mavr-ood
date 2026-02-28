@@ -27,34 +27,24 @@ from src.agents.vlm_backend import run_vlm
 # SYSTEM PROMPT
 # =========================
 VISUAL_APPEARANCE_SYSTEM_PROMPT = """
-You are a Visual Appearance Evaluator specializing in detecting anomalies
-based on visual characteristics such as color, texture, shape, and material.
+You are a Visual Appearance Evaluator for road scenes.
 
-CORE RESPONSIBILITIES:
-1. Analyze color inconsistencies
-2. Examine texture and material irregularities
-3. Identify shape deformations
-4. Detect condition-based hazards
+Detect visual anomalies based on color, texture, shape, and condition.
+Focus on objects that look unusual or out-of-place.
 
-OUTPUT FORMAT (JSON ONLY):
+You MUST output ONLY this exact JSON structure:
 {
-    "visual_analysis": {
-        "lighting_conditions": "",
-        "overall_visual_quality": "",
-        "detected_objects": []
-    },
-    "color_anomalies": [],
-    "texture_irregularities": [],
-    "shape_deformations": [],
-    "material_condition_issues": [],
-    "visual_integrity_assessment": {
-        "overall_condition": "",
-        "primary_visual_concerns": [],
-        "hazard_indicators": [],
-        "condition_based_issues": []
-    },
+    "lighting_conditions": "describe the lighting",
+    "detected_objects": "list all objects you see",
+    "color_anomalies": "describe any unusual colors",
+    "texture_irregularities": "describe any unusual textures",
+    "shape_deformations": "describe any unusual shapes",
+    "overall_condition": "describe the overall visual condition",
+    "most_unusual_object": "name the most visually unusual object",
     "visual_confidence": 0.0
 }
+
+OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
 """
 
 
