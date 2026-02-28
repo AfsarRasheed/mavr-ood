@@ -84,7 +84,7 @@ print("✅ Test folder ready (1 image)")
     --device cuda
 ```
 
-### Cell 7A — View Results
+### Cell 7A — View Results & Agent Reasoning
 ```python
 from IPython.display import display, Image as IPImage
 import glob, os, json
@@ -96,7 +96,22 @@ with open("outputs/test_single_results/multiagent_evaluation_results.json") as f
     print(f"📊 mIoU: {m['mIoU']:.4f} | F1: {m['F1']:.4f} | Precision: {m['Precision']:.4f} | Recall: {m['Recall']:.4f}")
     print(f"📊 Detection Rate: {results['detection_rate']}%\n")
 
+# Show agent reasoning
+with open("outputs/test_single_prompts/agent5_final_synthesis_results.json") as f:
+    agent5 = json.load(f)
+    for r in agent5.get("results", []):
+        img = r.get("image", "")
+        syn = r.get("synthesis_result", {})
+        prompts = syn.get("grounded_sam_prompts", {})
+        print(f"\n🤖 {img}")
+        print(f"   Prompt V1: {prompts.get('prompt_v1', 'N/A')}")
+        print(f"   Prompt V2: {prompts.get('prompt_v2', 'N/A')}")
+        print(f"   Confidence: {syn.get('overall_confidence', 'N/A')}")
+        print(f"   Anomaly Type: {syn.get('anomaly_type', 'N/A')}")
+        print(f"   Reasoning: {syn.get('reasoning', 'N/A')}")
+
 # Show visualizations
+print("\n" + "="*60)
 for r in sorted(glob.glob("outputs/test_single_results/*.jpg")):
     print(f"📷 {os.path.basename(r)}")
     display(IPImage(r, width=600))
@@ -128,17 +143,35 @@ for r in sorted(glob.glob("outputs/test_single_results/*.jpg")):
     --device cuda
 ```
 
-### Cell 6B — View All Results
+### Cell 6B — View All Results & Agent Reasoning
 ```python
 from IPython.display import display, Image as IPImage
 import glob, os, json
 
+# Metrics
 with open("outputs/evaluation_results/multiagent_evaluation_results.json") as f:
     results = json.load(f)
     m = results["average_metrics"]
-    print(f"📊 mIoU: {m['mIoU']:.4f} | F1: {m['F1']:.4f}")
-    print(f"📊 Detection Rate: {results['detection_rate']}%\n")
+    print(f"📊 mIoU: {m['mIoU']:.4f} | F1: {m['F1']:.4f} | Precision: {m['Precision']:.4f} | Recall: {m['Recall']:.4f}")
+    print(f"📊 Detection Rate: {results['detection_rate']}%")
 
+# Agent reasoning per image
+with open("outputs/challenging_subset_prompts/agent5_final_synthesis_results.json") as f:
+    agent5 = json.load(f)
+    print(f"\n{'='*60}")
+    print("🤖 AGENT REASONING")
+    print(f"{'='*60}")
+    for r in agent5.get("results", []):
+        img = r.get("image", "")
+        syn = r.get("synthesis_result", {})
+        prompts = syn.get("grounded_sam_prompts", {})
+        print(f"\n📸 {img}")
+        print(f"   V1: {prompts.get('prompt_v1', 'N/A')} | V2: {prompts.get('prompt_v2', 'N/A')}")
+        print(f"   Confidence: {syn.get('overall_confidence', 'N/A')} | Type: {syn.get('anomaly_type', 'N/A')}")
+        print(f"   Reasoning: {syn.get('reasoning', 'N/A')[:200]}")
+
+# Visualizations
+print(f"\n{'='*60}")
 for r in sorted(glob.glob("outputs/evaluation_results/*.jpg")):
     print(f"\n📷 {os.path.basename(r)}")
     display(IPImage(r, width=600))
