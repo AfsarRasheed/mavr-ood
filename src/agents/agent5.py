@@ -43,7 +43,8 @@ EXAMPLE OUTPUT (If you see a dog on the road):
     },
     "overall_confidence": 0.95,
     "anomaly_type": "animal",
-    "reasoning": "A dog is detected on the active roadway, which poses a severe collision hazard."
+    "anomaly_reasoning": "A dog is detected on the active roadway. This is unexpected because...",
+    "reasoning": "A dog is detected on the active roadway, which poses a severe collision hazard..."
 }
 
 Generate the exact JSON structure above for the CURRENT image based on the provided analysis.
