@@ -112,8 +112,15 @@ with open("outputs/test_single_prompts/agent5_final_synthesis_results.json") as 
 
 # Show visualizations
 print("\n" + "="*60)
-for r in sorted(glob.glob("outputs/test_single_results/*.jpg")):
-    print(f"📷 {os.path.basename(r)}")
+print("🧠 PIPELINE REASONING & VISUALIZATION")
+for r in sorted(glob.glob("outputs/test_single_results/*_pipeline_vis.jpg")):
+    print(f"\n📷 {os.path.basename(r)}")
+    display(IPImage(r, width=1200))
+
+print("\n" + "="*60)
+print("🎯 SYSTEM BALANCE (RADAR CHART)")
+for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
+    print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
 ```
 
@@ -169,19 +176,25 @@ with open("outputs/challenging_subset_prompts/agent5_final_synthesis_results.jso
         print(f"   V1: {prompts.get('prompt_v1', 'N/A')} | V2: {prompts.get('prompt_v2', 'N/A')}")
         print(f"   Confidence: {syn.get('overall_confidence', 'N/A')} | Type: {syn.get('anomaly_type', 'N/A')}")
         print(f"   Reasoning: {syn.get('reasoning', 'N/A')[:200]}")
-
 # Visualizations
 print(f"\n{'='*60}")
-for r in sorted(glob.glob("outputs/evaluation_results/*.jpg")):
+print("🧠 PIPELINE REASONING & VISUALIZATION")
+for r in sorted(glob.glob("outputs/evaluation_results/*_pipeline_vis.jpg")):
     print(f"\n📷 {os.path.basename(r)}")
+    display(IPImage(r, width=1200))
+
+print("\n" + "="*60)
+print("🎯 SYSTEM BALANCE (RADAR CHART)")
+for r in sorted(glob.glob("outputs/evaluation_results/*_spider_chart.jpg")):
+    print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
 ```
 
 ---
-
 ## Phase 3: Web App (Optional — choose one)
 
-### Option A — Gradio App
+### Option A — Advanced Gradio Dashboard (Recommended)
+Launch the beautiful new Gradio UI that includes live visual analytics, reasoning logs, and the new Radar Chart!
 ```python
 import app
 demo = app.build_app()
