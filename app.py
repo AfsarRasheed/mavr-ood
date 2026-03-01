@@ -295,46 +295,7 @@ def generate_pipeline_visualization_img(image, anomaly_reasoning, v1_prompt, v2_
         print(f"Visualization error: {e}")
         return image
 
-def generate_spider_chart_img(clip_score):
-    """Generates the Radar Chart as a numpy array. (Approximates mIoU/F1 for demo purposes if GT is missing)"""
-    try:
-        import io
-        labels = ['mIoU', 'F1 Score', 'Precision', 'Recall', 'CLIP Match']
-        
-        # Since Gradio doesn't have Ground Truth masks, we approximate the shape based on detection success
-        # to show the mentor how the chart functions in the live dashboard.
-        base_score = 0.95 if clip_score > 0 else 0.1
-        clip_val = min(clip_score / 0.40, 1.0)
-        
-        values = [base_score, base_score*1.02, base_score*0.99, base_score*1.01, clip_val]
-        values = np.clip(values, 0, 1.0)
-        
-        values = np.concatenate((values, [values[0]]))
-        angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
-        angles = np.concatenate((angles, [angles[0]]))
-        
-        # Add values to labels
-        labels_with_scores = [f"{label}\n({val:.2f})" for label, val in zip(labels, values[:-1])]
-        
-        fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
-        ax.plot(angles, values, 'o-', linewidth=3, color='#9b59b6', label='Current System')
-        ax.fill(angles, values, alpha=0.3, color='#9b59b6')
-        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels_with_scores, fontsize=11, weight='bold')
-        ax.set_ylim(0, 1)
-        ax.grid(color='#AAAAAA', linestyle='--', linewidth=1)
-        ax.plot(angles, [1.0]*6, color='black', alpha=0.5, linestyle=':', linewidth=2, label='Perfect Score')
-        ax.set_title("System Balance Radar (Estimated)", fontsize=14, pad=20, weight='bold')
-        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
-        
-        buf = io.BytesIO()
-        fig.savefig(buf, format="jpg", bbox_inches="tight", dpi=150)
-        buf.seek(0)
-        img_arr = np.array(Image.open(buf))
-        plt.close(fig)
-        return img_arr
-    except Exception as e:
-        print(f"Spider chart error: {e}")
-        return np.zeros((400, 400, 3), dtype=np.uint8)
+
 
 # =====================
 # Agent Pipeline
@@ -509,15 +470,12 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
         binary_img = image_np.copy()
         pipeline_img = image_np.copy()
         
-    avg_clip = np.mean(clip_scores_final) if len(clip_scores_final) > 0 else 0.0
-    spider_img = generate_spider_chart_img(avg_clip)
-
     progress(1.0, desc="✅ Done!")
 
     # Format agent analysis text
     analysis_text = format_analysis(agent_results, prompt_v1, prompt_v2, len(boxes))
 
-    return detection_img, mask_img, binary_img, pipeline_img, spider_img, analysis_text
+    return detection_img, mask_img, binary_img, pipeline_img, analysis_text
 
 def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
     """Format agent analysis for display."""
@@ -717,8 +675,6 @@ def build_app():
                                 label="GroundingDINO Box Threshold",
                                 info="Confidence threshold for initial detection",
                             )
-                            
-                        spider_output = gr.Image(label="🎯 System Balance (Radar Chart)", height=300)
 
                     # Right column: Agent Logs and Output Images
                     with gr.Column(scale=2):
@@ -741,7 +697,7 @@ def build_app():
                 run_single_btn.click(
                     fn=process_single_image,
                     inputs=[input_image, clip_thresh, box_thresh],
-                    outputs=[det_output, mask_output, binary_output, pipeline_output, spider_output, analysis_output],
+                    outputs=[det_output, mask_output, binary_output, pipeline_output, analysis_output],
                 )
 
             # ==================
