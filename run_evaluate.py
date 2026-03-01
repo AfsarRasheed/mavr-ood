@@ -241,6 +241,54 @@ def save_metrics_bar_chart(metrics_dict, save_path, title="Segmentation Metrics"
         print(f"✓ Metrics bar chart saved: {os.path.basename(save_path)}")
     except Exception as e:
         print(f"Warning: Failed to save metrics bar chart: {str(e)}")
+
+def save_spider_chart(metrics_dict, save_path, title="System Balance (Radar Chart)"):
+    """
+    Creates a 5-axis academic radar chart to visually prove the pipeline is balanced
+    (doesn't sacrifice Precision for Recall, etc.)
+    """
+    try:
+        labels = ['mIoU', 'F1 Score', 'Precision', 'Recall', 'CLIP Match']
+        
+        # Pull values. If CLIP is missing, default to 1.0 (perfect) or 0 depending on presence.
+        clip_val = min(metrics_dict.get('CLIP_Score', 0.0) / 0.40, 1.0) # Normalize CLIP (0.4 is usually max real-world score)
+        
+        values = [
+            metrics_dict.get('mIoU', 0.0),
+            metrics_dict.get('F1', 0.0),
+            metrics_dict.get('Precision', 0.0),
+            metrics_dict.get('Recall', 0.0),
+            clip_val
+        ]
+        
+        # Close the loop
+        values = np.concatenate((values, [values[0]]))
+        angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
+        angles = np.concatenate((angles, [angles[0]]))
+        
+        fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+        
+        # Plot and fill
+        ax.plot(angles, values, 'o-', linewidth=3, color='#9b59b6', label='Current System')
+        ax.fill(angles, values, alpha=0.3, color='#9b59b6')
+        
+        # Design formatting
+        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels, fontsize=13, weight='bold')
+        ax.set_ylim(0, 1)
+        
+        # Add gridlines and perfect circle limit
+        ax.grid(color='#AAAAAA', linestyle='--', linewidth=1)
+        ax.plot(angles, [1.0]*6, color='black', alpha=0.5, linestyle=':', linewidth=2, label='Perfect Score (1.0)')
+        
+        ax.set_title(title, fontsize=16, pad=20, weight='bold')
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+        
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
+        plt.close(fig)
+        print(f"✓ Polygon Spider chart saved: {os.path.basename(save_path)}")
+    except Exception as e:
+        print(f"Warning: Failed to save spider chart: {str(e)}")
+
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
@@ -760,6 +808,13 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                         metrics_dict=final_metrics,
                         save_path=os.path.join(output_dir, f"{image_name}_metrics_bar.jpg"),
                         title=f"Metrics for {image_name}"
+                    )
+                    
+                    # NEW: Save Academic Spider Chart
+                    save_spider_chart(
+                        metrics_dict=final_metrics,
+                        save_path=os.path.join(output_dir, f"{image_name}_spider_chart.jpg"),
+                        title=f"System Balance Radar for {image_name}"
                     )
             else:
                 print(f"✗ {image_name}: Evaluation failed")
