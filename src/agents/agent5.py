@@ -41,12 +41,13 @@ You MUST output ONLY this exact JSON structure:
         "prompt_v1": "adjective noun",
         "prompt_v2": "noun"
     },
-    "overall_confidence": 0.0,
+    "overall_confidence": 0.95,
     "anomaly_type": "type",
     "reasoning": "brief explanation"
 }
 
 OUTPUT ONLY THE JSON ABOVE. NO OTHER TEXT.
+CRITICAL: `overall_confidence` MUST be a number between 0.0 and 1.0. DO NOT use quotes around it.
 """
 
 
@@ -93,17 +94,18 @@ Return ONLY valid JSON following the required schema.
 
     def _parse_json_response(self, response: str) -> Dict:
         """Robustly parse JSON from LLaVA output"""
+        parsed = None
         import re
         # Pre-clean: Fix LLaVA's LaTeX-style escaped underscores
         response = response.replace("\\_", "_")
         try:
-            return json.loads(response)
+            parsed = json.loads(response)
         except Exception:
             pass
         code_block = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
         if code_block:
             try:
-                return json.loads(code_block.group(1).strip())
+                parsed = json.loads(code_block.group(1).strip())
             except Exception:
                 pass
         brace_start = response.find('{')
@@ -114,15 +116,15 @@ Return ONLY valid JSON following the required schema.
                 elif response[i] == '}': depth -= 1
                 if depth == 0:
                     try:
-                        return json.loads(response[brace_start:i+1])
+                        parsed = json.loads(response[brace_start:i+1])
                     except Exception:
                         break
         cleaned = response.strip()
         cleaned = re.sub(r'^[^{]*', '', cleaned)
         cleaned = re.sub(r'[^}]*$', '', cleaned)
-        if cleaned:
+        if cleaned and not parsed:
             try:
-                return json.loads(cleaned)
+                parsed = json.loads(cleaned)
             except Exception:
                 pass
         # Strategy 5: Truncated JSON recovery — close unfinished JSON
@@ -135,9 +137,20 @@ Return ONLY valid JSON following the required schema.
             truncated += ']' * max(0, open_brackets)
             truncated += '}' * max(0, open_braces)
             try:
-                return json.loads(truncated)
+                parsed = json.loads(truncated)
             except Exception:
                 pass
+        
+        # Enforce float conversion just in case LLaVA returned a string like "0.9"
+        if isinstance(parsed, dict) and "overall_confidence" in parsed:
+            try:
+                parsed["overall_confidence"] = float(parsed["overall_confidence"])
+            except:
+                pass
+                
+        if parsed is not None:
+            return parsed
+            
         return {"error": "JSON parsing failed", "raw_response": response}
 
     def load_json(self, path: str) -> Dict:
