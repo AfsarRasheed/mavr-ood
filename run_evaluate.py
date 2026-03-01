@@ -171,8 +171,76 @@ def save_visualization(image, masks, boxes, labels, save_path, title_suffix=""):
             print(f"✓ Info saved instead: {os.path.basename(info_path)}")
         except:
             pass
+def save_pipeline_visualization(image, anomaly_reasoning, v1_prompt, v2_prompt, boxes, clip_scores, masks, final_metrics, save_path):
+    try:
+        import textwrap
+        fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+        
+        # Panel A: Input + NLP Reasoning
+        ax1 = axes[0]
+        ax1.imshow(image)
+        ax1.axis('off')
+        ax1.set_title("Panel A: Input + VLM Reasoning", fontsize=16, pad=10, weight='bold')
+        
+        reasoning_text = f"Agent 5 Reasoning:\n{anomaly_reasoning}\n\nGenerated Prompts:\nV1: '{v1_prompt}'\nV2: '{v2_prompt}'"
+        wrapped_text = "\n".join(textwrap.wrap(reasoning_text, width=60))
+        ax1.text(0.5, -0.1, wrapped_text, ha='center', va='top', transform=ax1.transAxes, 
+                 fontsize=14, bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
 
+        # Panel B: GroundingDINO + CLIP
+        ax2 = axes[1]
+        ax2.imshow(image)
+        for i, box in enumerate(boxes):
+            clip_score = clip_scores[i] if i < len(clip_scores) else 0.0
+            label = f"Score: {clip_score:.3f}"
+            show_box(box.numpy() if hasattr(box, 'numpy') else box, ax2, label)
+        ax2.axis('off')
+        ax2.set_title("Panel B: GroundingDINO + CLIP Verifier", fontsize=16, pad=10, weight='bold')
 
+        # Panel C: Final SAM Mask + Metrics
+        ax3 = axes[2]
+        ax3.imshow(image)
+        for mask in masks:
+            mask_arr = mask.cpu().numpy() if hasattr(mask, 'cpu') else mask
+            show_mask(mask_arr, ax3, random_color=True)
+        ax3.axis('off')
+        ax3.set_title("Panel C: Final SAM Segmentation", fontsize=16, pad=10, weight='bold')
+        
+        metrics_text = f"mIoU: {final_metrics.get('mIoU', 0):.4f} | F1: {final_metrics.get('F1', 0):.4f}\nPrecision: {final_metrics.get('Precision', 0):.4f} | Recall: {final_metrics.get('Recall', 0):.4f}"
+        ax3.text(0.5, -0.1, metrics_text, ha='center', va='top', transform=ax3.transAxes, 
+                 fontsize=14, bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
+                 
+        plt.tight_layout(pad=3.0)
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
+        plt.close(fig)
+        print(f"✓ Pipeline visualization saved: {os.path.basename(save_path)}")
+    except Exception as e:
+        print(f"Warning: Failed to save pipeline visualization: {str(e)}")
+
+def save_metrics_bar_chart(metrics_dict, save_path, title="Segmentation Metrics"):
+    try:
+        metrics = ['mIoU', 'F1', 'Precision', 'Recall']
+        values = [metrics_dict.get(m, 0.0) for m in metrics]
+        
+        fig, ax = plt.subplots(figsize=(8, 6))
+        bars = ax.bar(metrics, values, color=['#3498db', '#2ecc71', '#9b59b6', '#e74c3c'])
+        
+        ax.set_ylim(0, 1.1)
+        ax.set_title(title, fontsize=16, pad=15, weight='bold')
+        ax.set_ylabel('Score', fontsize=14)
+        ax.tick_params(axis='both', which='major', labelsize=12)
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                    f'{height:.4f}', ha='center', va='bottom', fontsize=12, weight='bold')
+                    
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
+        plt.close(fig)
+        print(f"✓ Metrics bar chart saved: {os.path.basename(save_path)}")
+    except Exception as e:
+        print(f"Warning: Failed to save metrics bar chart: {str(e)}")
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
@@ -366,11 +434,18 @@ def load_multiagent_prompts(json_path):
                         final_prompts = sr
                 
                 if final_prompts and 'prompt_v1' in final_prompts and 'prompt_v2' in final_prompts:
+                    # Extract reasoning correctly handling different potential keys
+                    reasoning = ""
+                    if 'synthesis_result' in result:
+                        sr = result['synthesis_result']
+                        reasoning = sr.get('anomaly_reasoning', sr.get('reasoning', ''))
+                    
                     prompt_dict[image_name] = {
                         'prompt_v1': final_prompts['prompt_v1'],
                         'prompt_v2': final_prompts['prompt_v2'],
                         'overall_confidence': final_prompts.get('overall_confidence', 0.0),
-                        'detection_confidence': final_prompts.get('detection_confidence', 0.0)
+                        'detection_confidence': final_prompts.get('detection_confidence', 0.0),
+                        'reasoning': reasoning
                     }
         
         print(f"✓ Loaded prompts for {len(prompt_dict)} images from {json_path}")
@@ -665,6 +740,26 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                         image_cv, combined_masks_tensor, all_boxes, all_phrases,
                         os.path.join(output_dir, f"{image_name}_combined_result.jpg"),
                         title_suffix=f"Combined: V1+V2"
+                    )
+                    
+                    # NEW: Save 3-Panel Pipeline Visualization
+                    save_pipeline_visualization(
+                        image=image_cv, 
+                        anomaly_reasoning=prompts.get('reasoning', 'No reasoning provided.'), 
+                        v1_prompt=prompt_v1, 
+                        v2_prompt=prompt_v2, 
+                        boxes=all_boxes, 
+                        clip_scores=all_clip_scores, 
+                        masks=combined_masks_tensor, 
+                        final_metrics=final_metrics, 
+                        save_path=os.path.join(output_dir, f"{image_name}_pipeline_vis.jpg")
+                    )
+                    
+                    # NEW: Save Base Metrics Bar Chart
+                    save_metrics_bar_chart(
+                        metrics_dict=final_metrics,
+                        save_path=os.path.join(output_dir, f"{image_name}_metrics_bar.jpg"),
+                        title=f"Metrics for {image_name}"
                     )
             else:
                 print(f"✗ {image_name}: Evaluation failed")
