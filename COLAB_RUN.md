@@ -122,6 +122,12 @@ print("🎯 SYSTEM BALANCE (RADAR CHART)")
 for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
+
+print("\n" + "="*60)
+print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
+for r in sorted(glob.glob("outputs/test_single_results/*_scatter.jpg")):
+    print(f"\n📊 {os.path.basename(r)}")
+    display(IPImage(r, width=600))
 ```
 
 ---
@@ -188,6 +194,18 @@ print("🎯 SYSTEM BALANCE (RADAR CHART)")
 for r in sorted(glob.glob("outputs/evaluation_results/*_spider_chart.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
+
+print("\n" + "="*60)
+print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
+for r in sorted(glob.glob("outputs/evaluation_results/*_scatter.jpg")):
+    print(f"\n📊 {os.path.basename(r)}")
+    display(IPImage(r, width=800))
+
+print("\n" + "="*60)
+print("🧮 SYSTEM CONFUSION Matrix")
+from IPython.display import display, Image as IPImage
+if os.path.exists("outputs/evaluation_results/batch_confusion_matrix.jpg"):
+    display(IPImage("outputs/evaluation_results/batch_confusion_matrix.jpg", width=800))
 ```
 
 ---

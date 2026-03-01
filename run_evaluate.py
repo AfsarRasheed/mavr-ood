@@ -321,6 +321,132 @@ def save_spider_chart(metrics_dict, save_path, title="System Balance (Radar Char
     except Exception as e:
         print(f"Warning: Failed to save spider chart: {str(e)}")
 
+def save_confidence_scatter_plot(results_list, save_path):
+    """
+    Plots Agent 5 Overall Confidence vs Final mIoU across all evaluated images.
+    Demonstrates System Self-Awareness (correlation between LLM certainty and Vision accuracy).
+    """
+    try:
+        if not results_list or len(results_list) < 2:
+            print("Not enough data points to generate Scatter Plot.")
+            return
+
+        confidences = []
+        mious = []
+        image_names = []
+
+        for res in results_list:
+            # Safely extract metrics
+            conf = res.get('agent_confidence', 0.0)
+            metrics = res.get('final_metrics', {})
+            miou = metrics.get('mIoU', 0.0)
+            
+            confidences.append(conf)
+            mious.append(miou)
+            image_names.append(res['image_name'])
+
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # Create scatter plot with semi-transparent academic styling
+        ax.scatter(confidences, mious, alpha=0.7, s=100, c='#3498db', edgecolors='black', linewidths=1)
+        
+        # Calculate and plot the linear regression trendline (Line of Best Fit)
+        if len(confidences) > 1 and len(set(confidences)) > 1:
+            z = np.polyfit(confidences, mious, 1)
+            p = np.poly1d(z)
+            
+            # Plot trendline
+            x_trend = np.linspace(0, 1.0, 100)
+            ax.plot(x_trend, p(x_trend), "r--", alpha=0.8, linewidth=2, label=f"Trendline (Correlation)")
+            
+            # Calculate correlation coefficient (R-value)
+            correlation_matrix = np.corrcoef(confidences, mious)
+            r_value = correlation_matrix[0,1]
+            ax.text(0.05, 0.95, f"Pearson Correlation (R) = {r_value:.2f}", 
+                    transform=ax.transAxes, fontsize=12, weight='bold',
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        ax.set_title("System Self-Awareness: Language Confidence vs Vision Accuracy", fontsize=15, pad=15, weight='bold')
+        ax.set_xlabel("Agent 5 Overall Confidence (LLaVA-7B)", fontsize=12, weight='bold')
+        ax.set_ylabel("Final Segmentation mIoU (SAM)", fontsize=12, weight='bold')
+        
+        ax.set_xlim(-0.05, 1.05)
+        ax.set_ylim(-0.05, 1.05)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+        if len(confidences) > 1 and len(set(confidences)) > 1:
+            ax.legend(loc="lower right")
+        
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"✓ Scatter Plot (Confidence vs mIoU) saved: {os.path.basename(save_path)}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save scatter plot: {str(e)}")
+
+def save_confusion_matrix(tp, fp, tn, fn, save_path):
+    """
+    Generates a system-wide academic Confusion Matrix heatmap.
+    Plots True Positives, False Positives (Hallucinations), 
+    True Negatives, and False Negatives natively using Matplotlib.
+    """
+    try:
+        # Create 2x2 matrix
+        cm = np.array([[tn, fp], 
+                       [fn, tp]])
+        
+        # Calculate percentages
+        total = np.sum(cm)
+        if total == 0:
+            return
+            
+        cm_perc = cm / total * 100
+        
+        fig, ax = plt.subplots(figsize=(8, 6))
+        
+        # Basic heatmap using imshow
+        cax = ax.imshow(cm, interpolation='nearest', cmap='Blues')
+        fig.colorbar(cax, fraction=0.046, pad=0.04)
+        
+        # Labels and titles
+        classes = ['Normal Road (Negative)', 'OOD Anomaly (Positive)']
+        tick_marks = np.arange(len(classes))
+        
+        ax.set_xticks(tick_marks)
+        ax.set_yticks(tick_marks)
+        ax.set_xticklabels(classes, rotation=0, fontsize=12)
+        ax.set_yticklabels(classes, rotation=90, verticalalignment='center', fontsize=12)
+        
+        ax.set_xlabel('Predicted Label by Pipeline', fontsize=14, weight='bold', labelpad=15)
+        ax.set_ylabel('True Label (Ground Truth)', fontsize=14, weight='bold', labelpad=15)
+        ax.set_title('Global Pixel Confusion Matrix', fontsize=16, weight='bold', pad=20)
+        
+        # Add text annotations inside the squares
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                color = "white" if cm[i, j] > thresh else "black"
+                
+                # Format numbers with commas for readability
+                count_str = f"{int(cm[i, j]):,}"
+                perc_str = f"({cm_perc[i, j]:.2f}%)"
+                
+                text = f"{count_str}\n{perc_str}"
+                ax.text(j, i, text,
+                        horizontalalignment="center",
+                        verticalalignment="center",
+                        color=color, fontsize=14, weight='bold')
+
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"✓ Global Confusion Matrix saved: {os.path.basename(save_path)}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save confusion matrix: {str(e)}")
+
+>>>>>>> 62a4554 (Implement System Global Pixel Confusion Matrix heatmap generation in run_evaluate batch mode and update Colab docs)
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
@@ -917,6 +1043,12 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
     
     # visualize threshold distribution
     plot_multiagent_threshold_distribution(threshold_analysis, output_dir)
+    
+    # NEW: Generate System Self-Awareness Scatter Plot
+    save_confidence_scatter_plot(per_image_results, os.path.join(output_dir, "confidence_vs_miou_scatter.jpg"))
+    
+    # NEW: Generate System-Wide Confusion Matrix
+    save_confusion_matrix(global_tp, global_fp, global_tn, global_fn, os.path.join(output_dir, "batch_confusion_matrix.jpg"))
     
     # print results
     print(f"\n{'='*70}")
