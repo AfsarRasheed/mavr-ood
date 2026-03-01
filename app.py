@@ -447,8 +447,19 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
                 boxes_back[:, 3] = (filtered_boxes[:, 3] - filtered_boxes[:, 1]) / H
                 boxes = boxes_back
                 labels = filtered_phrases
+                
+            # NEW: Generate Visualization Heatmap
+            import cv2
+            progress(0.78, desc="🔥 Generating CLIP Heatmap...")
+            heatmap_raw = clip_verifier.generate_heatmap(image_np, prompt_v1)
+            heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
+            heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+            heatmap_img = cv2.addWeighted(image_np, 0.5, heatmap_colored, 0.5, 0)
         except Exception as e:
             print(f"CLIP verification warning: {e}")
+            heatmap_img = image_np.copy()
+    else:
+        heatmap_img = image_np.copy()
 
     # SAM Segmentation
     if len(boxes) > 0:
@@ -475,7 +486,7 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
     # Format agent analysis text
     analysis_text = format_analysis(agent_results, prompt_v1, prompt_v2, len(boxes))
 
-    return detection_img, mask_img, binary_img, pipeline_img, analysis_text
+    return detection_img, heatmap_img, mask_img, binary_img, pipeline_img, analysis_text
 
 def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
     """Format agent analysis for display."""
@@ -684,6 +695,7 @@ def build_app():
                                 
                                 with gr.Row():
                                     det_output = gr.Image(label="🟩 Bounding Boxes", height=250)
+                                    heatmap_output = gr.Image(label="🔥 CLIP Verifier Heatmap", height=250)
                                     mask_output = gr.Image(label="🎨 SAM Masks", height=250)
                                     binary_output = gr.Image(label="🩷 Final OOD Mask", height=250)
                                     
@@ -697,7 +709,7 @@ def build_app():
                 run_single_btn.click(
                     fn=process_single_image,
                     inputs=[input_image, clip_thresh, box_thresh],
-                    outputs=[det_output, mask_output, binary_output, pipeline_output, analysis_output],
+                    outputs=[det_output, heatmap_output, mask_output, binary_output, pipeline_output, analysis_output],
                 )
 
             # ==================

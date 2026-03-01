@@ -148,9 +148,78 @@ class CLIPVerifier:
         filtered_det_scores = (torch.stack(verified_det_scores) 
                                if verified_det_scores else None)
 
-        n_filtered = len(boxes) - len(verified_boxes)
         if n_filtered > 0:
             print(f"   🔍 CLIP filtered {n_filtered}/{len(boxes)} detections "
                   f"(threshold={self.similarity_threshold:.2f})")
 
         return filtered_boxes, verified_phrases, clip_scores, filtered_det_scores
+
+    @torch.no_grad()
+    def generate_heatmap(self, image: np.ndarray, text_prompt: str) -> np.ndarray:
+        """
+        Generates a dense semantic similarity heatmap across the entire image
+        by extracting spatial tokens from the Vision Transformer before pooling.
+        
+        Args:
+            image: numpy array (H, W, 3) RGB image
+            text_prompt: text description to map
+            
+        Returns:
+            numpy array (H, W) heatmap normalized to [0, 1]
+        """
+        import cv2
+        
+        # 1. Prepare image
+        pil_img = Image.fromarray(image)
+        image_input = self.preprocess(pil_img).unsqueeze(0).to(self.device)
+        
+        # 2. Encode text normally
+        text_input = clip.tokenize([text_prompt]).to(self.device)
+        text_features = self.model.encode_text(text_input)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        # 3. Extract dense image features (bypass final pooling)
+        # CLIP ViT-B/32 processes images in 32x32 patches. 224/32 = 7, so it outputs 7x7 spatial tokens + 1 CLS token
+        visual_model = self.model.visual
+        
+        x = image_input.type(visual_model.conv1.weight.dtype)
+        x = visual_model.conv1(x)  # shape = [*, width, grid, grid]
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        
+        # Add class token and positional embeddings
+        x = torch.cat([visual_model.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)
+        x = x + visual_model.positional_embedding.to(x.dtype)
+        x = visual_model.ln_pre(x)
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = visual_model.transformer(x)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+        
+        # We only want the spatial tokens (ignore the [CLS] token at index 0)
+        spatial_tokens = x[:, 1:, :] 
+        spatial_tokens = visual_model.ln_post(spatial_tokens)
+        
+        # Project tokens to the joint multimodal space
+        dense_image_features = spatial_tokens @ visual_model.proj
+        
+        # Normalize features
+        dense_image_features = dense_image_features / dense_image_features.norm(dim=-1, keepdim=True)
+        
+        # 4. Compute similarity per spatial patch
+        # dense_image_features shape: [1, 49, 512]
+        # text_features shape: [1, 512]
+        similarity_map = (dense_image_features[0] @ text_features[0]).cpu().numpy()
+        
+        # 5. Reshape and Normalize
+        # The 49 tokens represent a 7x7 grid (for 224x224 input)
+        grid_size = int(np.sqrt(similarity_map.shape[0]))
+        similarity_map = similarity_map.reshape(grid_size, grid_size)
+        
+        # Min-max scale the map to [0, 1] for visualization
+        similarity_map = (similarity_map - similarity_map.min()) / (similarity_map.max() - similarity_map.min() + 1e-8)
+        
+        # Resize to match original image dimensions
+        H, W = image.shape[:2]
+        heatmap = cv2.resize(similarity_map, (W, H), interpolation=cv2.INTER_CUBIC)
+        
+        return heatmap
