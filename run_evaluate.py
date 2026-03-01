@@ -356,6 +356,67 @@ def save_confidence_scatter_plot(results_list, save_path):
     except Exception as e:
         print(f"Warning: Failed to save scatter plot: {str(e)}")
 
+def save_confusion_matrix(tp, fp, tn, fn, save_path):
+    """
+    Generates a system-wide academic Confusion Matrix heatmap.
+    Plots True Positives, False Positives (Hallucinations), 
+    True Negatives, and False Negatives natively using Matplotlib.
+    """
+    try:
+        # Create 2x2 matrix
+        cm = np.array([[tn, fp], 
+                       [fn, tp]])
+        
+        # Calculate percentages
+        total = np.sum(cm)
+        if total == 0:
+            return
+            
+        cm_perc = cm / total * 100
+        
+        fig, ax = plt.subplots(figsize=(8, 6))
+        
+        # Basic heatmap using imshow
+        cax = ax.imshow(cm, interpolation='nearest', cmap='Blues')
+        fig.colorbar(cax, fraction=0.046, pad=0.04)
+        
+        # Labels and titles
+        classes = ['Normal Road (Negative)', 'OOD Anomaly (Positive)']
+        tick_marks = np.arange(len(classes))
+        
+        ax.set_xticks(tick_marks)
+        ax.set_yticks(tick_marks)
+        ax.set_xticklabels(classes, rotation=0, fontsize=12)
+        ax.set_yticklabels(classes, rotation=90, verticalalignment='center', fontsize=12)
+        
+        ax.set_xlabel('Predicted Label by Pipeline', fontsize=14, weight='bold', labelpad=15)
+        ax.set_ylabel('True Label (Ground Truth)', fontsize=14, weight='bold', labelpad=15)
+        ax.set_title('Global Pixel Confusion Matrix', fontsize=16, weight='bold', pad=20)
+        
+        # Add text annotations inside the squares
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                color = "white" if cm[i, j] > thresh else "black"
+                
+                # Format numbers with commas for readability
+                count_str = f"{int(cm[i, j]):,}"
+                perc_str = f"({cm_perc[i, j]:.2f}%)"
+                
+                text = f"{count_str}\n{perc_str}"
+                ax.text(j, i, text,
+                        horizontalalignment="center",
+                        verticalalignment="center",
+                        color=color, fontsize=14, weight='bold')
+
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"✓ Global Confusion Matrix saved: {os.path.basename(save_path)}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save confusion matrix: {str(e)}")
+
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
@@ -906,6 +967,12 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
     for metric in all_metric_keys:
         values = [m.get(metric, 0.0) for m in all_metrics]
         avg_metrics[metric] = np.mean(values)
+        
+    # calculate total global pixel counts for Confusion Matrix
+    global_tp = sum(m.get('TP', 0.0) for m in all_metrics)
+    global_fp = sum(m.get('FP', 0.0) for m in all_metrics)
+    global_tn = sum(m.get('TN', 0.0) for m in all_metrics)
+    global_fn = sum(m.get('FN', 0.0) for m in all_metrics)
     
     # calculate threshold statistics
     threshold_analysis = {}
@@ -949,6 +1016,9 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
     
     # NEW: Generate System Self-Awareness Scatter Plot
     save_confidence_scatter_plot(per_image_results, os.path.join(output_dir, "confidence_vs_miou_scatter.jpg"))
+    
+    # NEW: Generate System-Wide Confusion Matrix
+    save_confusion_matrix(global_tp, global_fp, global_tn, global_fn, os.path.join(output_dir, "batch_confusion_matrix.jpg"))
     
     # print results
     print(f"\n{'='*70}")
