@@ -313,10 +313,13 @@ def generate_spider_chart_img(clip_score):
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
         angles = np.concatenate((angles, [angles[0]]))
         
+        # Add values to labels
+        labels_with_scores = [f"{label}\n({val:.2f})" for label, val in zip(labels, values[:-1])]
+        
         fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
         ax.plot(angles, values, 'o-', linewidth=3, color='#9b59b6', label='Current System')
         ax.fill(angles, values, alpha=0.3, color='#9b59b6')
-        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels, fontsize=11, weight='bold')
+        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels_with_scores, fontsize=11, weight='bold')
         ax.set_ylim(0, 1)
         ax.grid(color='#AAAAAA', linestyle='--', linewidth=1)
         ax.plot(angles, [1.0]*6, color='black', alpha=0.5, linestyle=':', linewidth=2, label='Perfect Score')

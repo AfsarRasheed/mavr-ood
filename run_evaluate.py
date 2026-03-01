@@ -266,6 +266,9 @@ def save_spider_chart(metrics_dict, save_path, title="System Balance (Radar Char
         angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
         angles = np.concatenate((angles, [angles[0]]))
         
+        # Add values to labels
+        labels_with_scores = [f"{label}\n({val:.2f})" for label, val in zip(labels, values[:-1])]
+        
         fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
         
         # Plot and fill
@@ -273,7 +276,7 @@ def save_spider_chart(metrics_dict, save_path, title="System Balance (Radar Char
         ax.fill(angles, values, alpha=0.3, color='#9b59b6')
         
         # Design formatting
-        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels, fontsize=13, weight='bold')
+        ax.set_thetagrids(angles[:-1] * 180 / np.pi, labels_with_scores, fontsize=13, weight='bold')
         ax.set_ylim(0, 1)
         
         # Add gridlines and perfect circle limit
