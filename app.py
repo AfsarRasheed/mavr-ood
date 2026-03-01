@@ -691,7 +691,7 @@ def build_app():
                                 analysis_output = gr.Textbox(
                                     label="Live Agent Synthesis Logs",
                                     lines=35,
-                                    max_lines=50,
+                                    max_lines=35,
                                 )
 
                 run_single_btn.click(
