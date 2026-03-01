@@ -399,8 +399,9 @@ def run_agents_on_image(image_path):
 def extract_prompts(agent_results):
     """Extract prompt_v1 and prompt_v2 from agent 5 results."""
     a5 = agent_results.get("agent5", {})
-    prompt_v1 = a5.get("prompt_v1", a5.get("detailed_prompt", "unusual object on road"))
-    prompt_v2 = a5.get("prompt_v2", a5.get("simple_prompt", "anomaly"))
+    prompts = a5.get("grounded_sam_prompts", {})
+    prompt_v1 = prompts.get("prompt_v1", a5.get("detailed_prompt", "unusual object on road"))
+    prompt_v2 = prompts.get("prompt_v2", a5.get("simple_prompt", "anomaly"))
     return prompt_v1, prompt_v2
 
 
