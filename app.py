@@ -677,7 +677,7 @@ def build_app():
                             )
 
                     # Right column: Agent Logs and Output Images
-                    with gr.Column(scale=2):
+                    with gr.Column(scale=3):
                         with gr.Tabs():
                             with gr.TabItem("📊 Visual Dashboard"):
                                 pipeline_output = gr.Image(label="🧠 Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
@@ -690,8 +690,8 @@ def build_app():
                             with gr.TabItem("📝 Agent Logs & Reasoning"):
                                 analysis_output = gr.Textbox(
                                     label="Live Agent Synthesis Logs",
-                                    lines=25,
-                                    max_lines=40,
+                                    lines=35,
+                                    max_lines=50,
                                 )
 
                 run_single_btn.click(
