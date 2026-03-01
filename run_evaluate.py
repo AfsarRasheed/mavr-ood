@@ -217,6 +217,29 @@ def save_pipeline_visualization(image, anomaly_reasoning, v1_prompt, v2_prompt, 
     except Exception as e:
         print(f"Warning: Failed to save pipeline visualization: {str(e)}")
 
+def save_heatmap_overlay(image_cv, clip_verifier, prompt, save_path):
+    """Generates and saves the CLIP Verifier Heatmap directly to disk"""
+    try:
+        if clip_verifier is None:
+            return
+            
+        import cv2
+        heatmap_raw = clip_verifier.generate_heatmap(image_cv, prompt)
+        heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
+        heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        
+        # Original image is expected to be RGB here as well
+        heatmap_img = cv2.addWeighted(image_cv, 0.5, heatmap_colored, 0.5, 0)
+        
+        # Save output using PIL to preserve RGB mapping
+        from PIL import Image
+        out_pil = Image.fromarray(heatmap_img)
+        out_pil.save(save_path, quality=95)
+        print(f"✓ CLIP Heatmap saved: {os.path.basename(save_path)}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save heatmap overlay: {str(e)}")
+
 def save_metrics_bar_chart(metrics_dict, save_path, title="Segmentation Metrics"):
     try:
         metrics = ['mIoU', 'F1', 'Precision', 'Recall']
