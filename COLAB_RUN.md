@@ -118,10 +118,10 @@ for r in sorted(glob.glob("outputs/test_single_results/*_pipeline_vis.jpg")):
     display(IPImage(r, width=1200))
 
 print("\n" + "="*60)
-print("🎯 SYSTEM BALANCE (RADAR CHART)")
-for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
+print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
+for r in sorted(glob.glob("outputs/test_single_results/*_scatter.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
-    display(IPImage(r, width=600))
+    display(IPImage(r, width=800))
 ```
 
 ---
@@ -184,17 +184,17 @@ for r in sorted(glob.glob("outputs/evaluation_results/*_pipeline_vis.jpg")):
     display(IPImage(r, width=1200))
 
 print("\n" + "="*60)
-print("🎯 SYSTEM BALANCE (RADAR CHART)")
-for r in sorted(glob.glob("outputs/evaluation_results/*_spider_chart.jpg")):
+print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
+for r in sorted(glob.glob("outputs/evaluation_results/*_scatter.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
-    display(IPImage(r, width=600))
+    display(IPImage(r, width=800))
 ```
 
 ---
 ## Phase 3: Web App (Optional — choose one)
 
 ### Option A — Advanced Gradio Dashboard (Recommended)
-Launch the beautiful new Gradio UI that includes live visual analytics, reasoning logs, and the new Radar Chart!
+Launch the beautiful new Gradio UI that includes live visual analytics, reasoning logs, and the new 🔥 **CLIP Verifier Heatmap**!
 ```python
 import app
 demo = app.build_app()
