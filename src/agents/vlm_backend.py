@@ -39,13 +39,13 @@ def _can_use_4bit():
         # bitsandbytes only works on Linux (Colab)
         import platform
         if platform.system() == "Linux":
-            print("   ✅ bitsandbytes available — using 4-bit quantization")
+            print("   [OK] bitsandbytes available — using 4-bit quantization")
             return True
         else:
-            print("   ⚠️ bitsandbytes not supported on Windows — using FP16")
+            print("   [WARN] bitsandbytes not supported on Windows — using FP16")
             return False
     except ImportError:
-        print("   ⚠️ bitsandbytes not installed — using FP16")
+        print("   [WARN] bitsandbytes not installed — using FP16")
         return False
 
 # =========================
@@ -75,7 +75,7 @@ def _load_model():
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
         )
-        print("   📦 Loading with 4-bit NF4 quantization (~4GB VRAM)")
+        print("   [i] Loading with 4-bit NF4 quantization (~4GB VRAM)")
         _model = LlavaForConditionalGeneration.from_pretrained(
             MODEL_NAME,
             quantization_config=quantization_config,
@@ -83,7 +83,7 @@ def _load_model():
             low_cpu_mem_usage=True,
         )
     else:
-        print("   📦 Loading in FP16 with auto device_map (GPU + CPU split)")
+        print("   [i] Loading in FP16 with auto device_map (GPU + CPU split)")
         _model = LlavaForConditionalGeneration.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.float16,
@@ -94,11 +94,11 @@ def _load_model():
     # Load processor
     _processor = AutoProcessor.from_pretrained(MODEL_NAME)
 
-    print(f"   ✅ Model loaded successfully")
+    print(f"   [OK] Model loaded successfully")
     if hasattr(_model, 'hf_device_map'):
         # Show summary instead of full map
         devices = set(_model.hf_device_map.values())
-        print(f"   📊 Model distributed across: {devices}")
+        print(f"   [i] Model distributed across: {devices}")
     return _model, _processor
 
 

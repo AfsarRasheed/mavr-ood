@@ -36,10 +36,10 @@ class CLIPVerifier:
         self.device = device
         self.similarity_threshold = similarity_threshold
 
-        print(f"🔍 Loading CLIP model: {model_name}")
+        print(f"[*] Loading CLIP model: {model_name}")
         self.model, self.preprocess = clip.load(model_name, device=device)
         self.model.eval()
-        print(f"   ✅ CLIP loaded on {device}")
+        print(f"   [OK] CLIP loaded on {device}")
 
     @torch.no_grad()
     def compute_similarity(self, image_crop: Image.Image, text_prompt: str) -> float:
@@ -148,7 +148,7 @@ class CLIPVerifier:
         # This prevents total detection failure for valid but low-confidence matches
         if len(verified_boxes) == 0 and len(all_scores_info) > 0:
             best_idx, best_score = max(all_scores_info, key=lambda x: x[1])
-            print(f"   ⚠️ CLIP rejected all {len(all_scores_info)} detections "
+            print(f"   [WARN] CLIP rejected all {len(all_scores_info)} detections "
                   f"(best={best_score:.3f}, threshold={self.similarity_threshold:.2f}). "
                   f"Keeping best detection as fallback.")
             verified_boxes.append(boxes[best_idx])
@@ -167,7 +167,7 @@ class CLIPVerifier:
 
         n_filtered = len(boxes) - len(verified_boxes)
         if n_filtered > 0:
-            print(f"   🔍 CLIP filtered {n_filtered}/{len(boxes)} detections "
+            print(f"   [*] CLIP filtered {n_filtered}/{len(boxes)} detections "
                   f"(threshold={self.similarity_threshold:.2f})")
 
         return filtered_boxes, verified_phrases, clip_scores, filtered_det_scores

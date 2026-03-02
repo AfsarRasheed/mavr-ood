@@ -337,10 +337,10 @@ def test_segment_me_datasets():
             dataset = DatasetFactory.create_dataset(dataset_dir)
             
             if len(dataset) == 0:
-                print("❌ No valid samples found!")
+                print("[FAIL] No valid samples found!")
                 continue
             
-            print(f"✅ Dataset loaded successfully: {len(dataset)} samples")
+            print(f"[OK] Dataset loaded successfully: {len(dataset)} samples")
             
             # Test first 3 samples
             for i in range(min(3, len(dataset))):
@@ -361,23 +361,23 @@ def test_segment_me_datasets():
                 mask_hw = sample['mask'].shape
                 
                 if image_hw == mask_hw:
-                    print(f"✅ Image-mask size match: {image_hw}")
+                    print(f"[OK] Image-mask size match: {image_hw}")
                 else:
-                    print(f"❌ Size mismatch: Image {image_hw} vs Mask {mask_hw}")
+                    print(f"[FAIL] Size mismatch: Image {image_hw} vs Mask {mask_hw}")
                 
                 # Check mask values
                 mask_unique = np.unique(sample['mask'])
                 print(f"Mask unique values: {mask_unique}")
                 
                 if len(mask_unique) == 2 and set(mask_unique) == {False, True}:
-                    print("✅ Binary mask confirmed")
+                    print("[OK] Binary mask confirmed")
                 elif len(mask_unique) == 1 and mask_unique[0] == False:
-                    print("⚠️ No positive pixels found - check orange color detection")
+                    print("[WARN] No positive pixels found - check orange color detection")
                 else:
-                    print(f"⚠️ Unexpected mask values: {mask_unique}")
+                    print(f"[WARN] Unexpected mask values: {mask_unique}")
                     
         except Exception as e:
-            print(f"❌ Error testing {dataset_dir}: {str(e)}")
+            print(f"[FAIL] Error testing {dataset_dir}: {str(e)}")
             import traceback
             traceback.print_exc()
 

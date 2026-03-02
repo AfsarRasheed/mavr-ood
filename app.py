@@ -75,7 +75,7 @@ def load_gdino_model():
     if _gdino_model is not None:
         return _gdino_model
 
-    print("📦 Loading GroundingDINO...")
+    print("[i] Loading GroundingDINO...")
     args = SLConfig.fromfile(DEFAULT_GDINO_CONFIG)
     args.device = DEVICE
     args.bert_base_uncased_path = None
@@ -84,7 +84,7 @@ def load_gdino_model():
     _gdino_model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     _gdino_model = _gdino_model.to(DEVICE)
     _gdino_model.eval()
-    print("✅ GroundingDINO loaded")
+    print("[OK] GroundingDINO loaded")
     return _gdino_model
 
 
@@ -94,11 +94,11 @@ def load_sam_predictor():
     if _sam_predictor is not None:
         return _sam_predictor
 
-    print("📦 Loading SAM...")
+    print("[i] Loading SAM...")
     sam = sam_model_registry["vit_h"](checkpoint=DEFAULT_SAM_CKPT)
     sam = sam.to(DEVICE)
     _sam_predictor = SamPredictor(sam)
-    print("✅ SAM loaded")
+    print("[OK] SAM loaded")
     return _sam_predictor
 
 
@@ -108,10 +108,10 @@ def load_clip_verifier():
     if _clip_verifier is not None:
         return _clip_verifier
 
-    print("📦 Loading CLIP...")
+    print("[i] Loading CLIP...")
     from src.clip_verifier import CLIPVerifier
     _clip_verifier = CLIPVerifier(device=DEVICE)
-    print("✅ CLIP loaded")
+    print("[OK] CLIP loaded")
     return _clip_verifier
 
 
@@ -387,23 +387,23 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
     image_np = np.array(image_pil)
 
     # Stage 1: Run agents
-    progress(0.1, desc="🤖 Running Agent 1: Scene Context...")
+    progress(0.1, desc="[i] Running Agent 1: Scene Context...")
     agent_results = run_agents_on_image(tmp_path)
     
     # Extract reasoning for visualizations
     a5_data = agent_results.get("agent5", {})
     reasoning = a5_data.get('anomaly_reasoning', a5_data.get('reasoning', 'No reasoning generated.'))
 
-    progress(0.5, desc="🔍 Extracting prompts...")
+    progress(0.5, desc="[*] Extracting prompts...")
     prompt_v1, prompt_v2 = extract_prompts(agent_results)
 
     # Stage 2: GroundingDINO Detection
-    progress(0.55, desc="📦 Loading GroundingDINO + SAM...")
+    progress(0.55, desc="[i] Loading GroundingDINO + SAM...")
     gdino = load_gdino_model()
     predictor = load_sam_predictor()
     clip_verifier = load_clip_verifier()
 
-    progress(0.65, desc=f"🎯 Detecting with prompt: '{prompt_v1}'...")
+    progress(0.65, desc=f"[>] Detecting with prompt: '{prompt_v1}'...")
     image_tensor = preprocess_image(image_pil)
 
     # Try prompt_v1
@@ -414,7 +414,7 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
 
     # If no detections with v1, try v2
     if len(boxes) == 0 and prompt_v2 != prompt_v1:
-        progress(0.7, desc=f"🎯 Trying prompt_v2: '{prompt_v2}'...")
+        progress(0.7, desc=f"[>] Trying prompt_v2: '{prompt_v2}'...")
         boxes, labels, scores = get_grounding_output(
             gdino, image_tensor, prompt_v2,
             box_threshold=box_threshold, text_threshold=0.25
@@ -423,7 +423,7 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
     # CLIP verification
     clip_scores_final = []
     if len(boxes) > 0:
-        progress(0.75, desc="✅ CLIP verification...")
+        progress(0.75, desc="[OK] CLIP verification...")
         try:
             # First convert GroundingDINO boxes (cxcywh normalized) to pixel xyxy for CLIP
             H, W = image_np.shape[:2]
@@ -451,18 +451,18 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
             # NEW: Generate Visualization Heatmap (separate try-except so CLIP verification still works even if heatmap fails)
             try:
                 import cv2
-                progress(0.78, desc="🔥 Generating CLIP Heatmap...")
+                progress(0.78, desc="[i] Generating CLIP Heatmap...")
                 heatmap_raw = clip_verifier.generate_heatmap(image_np, prompt_v1)
                 if heatmap_raw is not None:
                     heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
                     heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
                     heatmap_img = cv2.addWeighted(image_np, 0.5, heatmap_colored, 0.5, 0)
-                    print(f"✅ CLIP heatmap generated successfully")
+                    print(f"[OK] CLIP heatmap generated successfully")
                 else:
-                    print(f"⚠️ CLIP heatmap returned None")
+                    print(f"[WARN] CLIP heatmap returned None")
                     heatmap_img = image_np.copy()
             except Exception as heatmap_err:
-                print(f"⚠️ CLIP heatmap generation failed: {heatmap_err}")
+                print(f"[WARN] CLIP heatmap generation failed: {heatmap_err}")
                 import traceback
                 traceback.print_exc()
                 heatmap_img = image_np.copy()
@@ -474,10 +474,10 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
 
     # SAM Segmentation
     if len(boxes) > 0:
-        progress(0.8, desc="🎨 Running SAM segmentation...")
+        progress(0.8, desc="[>] Running SAM segmentation...")
         masks, boxes_xyxy = run_sam_segmentation(predictor, image_np, boxes)
 
-        progress(0.9, desc="🖼️ Creating visualizations...")
+        progress(0.9, desc="[i] Creating visualizations...")
         detection_img = create_detection_visualization(image_np, boxes_xyxy, labels)
         mask_img = create_mask_visualization(image_np, masks)
         binary_img = create_binary_mask_visualization(image_np, masks)
@@ -492,7 +492,7 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
         binary_img = image_np.copy()
         pipeline_img = image_np.copy()
         
-    progress(1.0, desc="✅ Done!")
+    progress(1.0, desc="[OK] Done!")
 
     # Format agent analysis text
     analysis_text = format_analysis(agent_results, prompt_v1, prompt_v2, len(boxes))
@@ -503,11 +503,11 @@ def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
     """Format agent analysis for display."""
     lines = []
     lines.append("=" * 60)
-    lines.append("📊 DETECTION RESULTS")
+    lines.append("[i] DETECTION RESULTS")
     lines.append("=" * 60)
-    lines.append(f"🎯 Prompt V1: \"{prompt_v1}\"")
-    lines.append(f"🎯 Prompt V2: \"{prompt_v2}\"")
-    lines.append(f"📦 Detections found: {num_detections}")
+    lines.append(f"[>] Prompt V1: \"{prompt_v1}\"")
+    lines.append(f"[>] Prompt V2: \"{prompt_v2}\"")
+    lines.append(f"[i] Detections found: {num_detections}")
     lines.append("")
 
     for i, (name, data) in enumerate([
@@ -518,11 +518,11 @@ def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
         ("Agent 5 - Synthesis", agent_results.get("agent5", {})),
     ]):
         lines.append(f"{'─' * 50}")
-        lines.append(f"🤖 {name}")
+        lines.append(f"[i] {name}")
         lines.append(f"{'─' * 50}")
         if isinstance(data, dict):
             if "error" in data:
-                lines.append(f"  ❌ Error: {data['error'][:100]}")
+                lines.append(f"  [FAIL] Error: {data['error'][:100]}")
             else:
                 for k, v in data.items():
                     val_str = str(v)
@@ -542,7 +542,7 @@ def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
 def process_batch(dataset_dir, clip_threshold, box_threshold, progress=gr.Progress()):
     """Process all images in a dataset directory."""
     if not dataset_dir or not os.path.exists(dataset_dir):
-        return [], "❌ Dataset directory not found. Check the path."
+        return [], "[FAIL] Dataset directory not found. Check the path."
 
     img_dir = os.path.join(dataset_dir, "original")
     if not os.path.exists(img_dir):
@@ -554,9 +554,9 @@ def process_batch(dataset_dir, clip_threshold, box_threshold, progress=gr.Progre
     ])
 
     if not image_files:
-        return [], "❌ No images found in the directory."
+        return [], "[FAIL] No images found in the directory."
 
-    progress(0.05, desc="📦 Loading models...")
+    progress(0.05, desc="[i] Loading models...")
     gdino = load_gdino_model()
     predictor = load_sam_predictor()
     clip_verifier = load_clip_verifier()
@@ -636,10 +636,10 @@ def process_batch(dataset_dir, clip_threshold, box_threshold, progress=gr.Progre
             f"{img_file:<50} {prompt_v1[:28]:<30} {len(boxes):<12}"
         )
 
-    progress(1.0, desc="✅ Batch complete!")
+    progress(1.0, desc="[OK] Batch complete!")
 
     summary = "\n".join(results_text_lines)
-    summary += f"\n\n✅ Processed {len(image_files)} images"
+    summary += f"\n\n[OK] Processed {len(image_files)} images"
 
     return results_gallery, summary
 
@@ -671,7 +671,7 @@ def build_app():
             # ==================
             # Tab 1: Single Image
             # ==================
-            with gr.TabItem("🖼️ Single Image Analysis", id="single"):
+            with gr.TabItem("[i] Single Image Analysis", id="single"):
                 gr.Markdown("Upload a road scene image to generate the full analytical dashboard.")
 
                 with gr.Row():
@@ -683,10 +683,10 @@ def build_app():
                             height=350,
                         )
                         run_single_btn = gr.Button(
-                            "🚀 Run Advanced Detection", variant="primary", size="lg"
+                            "[>>] Run Advanced Detection", variant="primary", size="lg"
                         )
                         
-                        with gr.Accordion("⚙️ Advanced Tuning Parameters", open=False):
+                        with gr.Accordion("[*] Advanced Tuning Parameters", open=False):
                             clip_thresh = gr.Slider(
                                 0.05, 0.5, value=0.20, step=0.05,
                                 label="CLIP Verifier Threshold",
@@ -701,16 +701,16 @@ def build_app():
                     # Right column: Agent Logs and Output Images
                     with gr.Column(scale=3):
                         with gr.Tabs():
-                            with gr.TabItem("📊 Visual Dashboard"):
-                                pipeline_output = gr.Image(label="🧠 Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
+                            with gr.TabItem("[i] Visual Dashboard"):
+                                pipeline_output = gr.Image(label="[i] Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
                                 
                                 with gr.Row():
                                     det_output = gr.Image(label="🟩 Bounding Boxes", height=250)
-                                    heatmap_output = gr.Image(label="🔥 CLIP Verifier Heatmap", height=250)
-                                    mask_output = gr.Image(label="🎨 SAM Masks", height=250)
+                                    heatmap_output = gr.Image(label="[i] CLIP Verifier Heatmap", height=250)
+                                    mask_output = gr.Image(label="[>] SAM Masks", height=250)
                                     binary_output = gr.Image(label="🩷 Final OOD Mask", height=250)
                                     
-                            with gr.TabItem("📝 Agent Logs & Reasoning"):
+                            with gr.TabItem("[i] Agent Logs & Reasoning"):
                                 analysis_output = gr.Textbox(
                                     label="Live Agent Synthesis Logs",
                                     lines=35,
@@ -726,7 +726,7 @@ def build_app():
             # ==================
             # Tab 2: Batch Dataset
             # ==================
-            with gr.TabItem("📁 Batch Dataset", id="batch"):
+            with gr.TabItem("[>] Batch Dataset", id="batch"):
                 gr.Markdown("Process an entire dataset folder. Default: `./data/challenging_subset`")
 
                 with gr.Row():
@@ -747,7 +747,7 @@ def build_app():
                     )
 
                 run_batch_btn = gr.Button(
-                    "🚀 Run Batch Detection", variant="primary", size="lg"
+                    "[>>] Run Batch Detection", variant="primary", size="lg"
                 )
 
                 batch_gallery = gr.Gallery(
@@ -758,7 +758,7 @@ def build_app():
                 )
 
                 batch_summary = gr.Textbox(
-                    label="📊 Batch Results Summary",
+                    label="[i] Batch Results Summary",
                     lines=15,
                     max_lines=30,
                 )

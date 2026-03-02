@@ -75,13 +75,13 @@ class SceneContextAnalyzer:
     def __init__(self, delay_between_requests: float = 2.0):
         self.delay_between_requests = delay_between_requests
 
-        print("🚀 AGENT 1: Scene Context Analyzer (LLaVA-7B)")
-        print("🧠 Using LLaVA-7B for contextual reasoning")
+        print("[>>] AGENT 1: Scene Context Analyzer (LLaVA-7B)")
+        print("[i] Using LLaVA-7B for contextual reasoning")
 
     def analyze_image(self, image_path: str) -> Dict:
         """Analyze scene context using LLaVA-7B"""
 
-        print(f"🔍 Analyzing: {image_path}")
+        print(f"[*] Analyzing: {image_path}")
 
         try:
             messages = [
@@ -96,7 +96,7 @@ class SceneContextAnalyzer:
             return self._parse_json_response(output)
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"[FAIL] Error: {e}")
             return {"error": str(e)}
 
     def _parse_json_response(self, response: str) -> Dict:
@@ -172,7 +172,7 @@ class SceneContextAnalyzer:
         ]
 
         if not image_files:
-            print("❌ No images found")
+            print("[FAIL] No images found")
             return
 
         results = {
@@ -200,7 +200,7 @@ class SceneContextAnalyzer:
                 "scene_context_analysis": analysis
             })
 
-            print(f"✅ Done in {duration:.2f}s")
+            print(f"[OK] Done in {duration:.2f}s")
 
             if i < len(image_files) - 1:
                 time.sleep(self.delay_between_requests)
@@ -208,7 +208,7 @@ class SceneContextAnalyzer:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        print(f"\n💾 Results saved to {output_file}")
+        print(f"\n[>] Results saved to {output_file}")
 
 
 # =========================
@@ -225,4 +225,4 @@ if __name__ == "__main__":
     agent = SceneContextAnalyzer(delay_between_requests=args.delay_between_requests)
     agent.process_batch(args.image_directory, args.output_file)
 
-    print("\n✅ Agent 1 completed successfully")
+    print("\n[OK] Agent 1 completed successfully")

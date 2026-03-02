@@ -23,9 +23,9 @@ from datetime import datetime
 def run_agent(agent_script: str, description: str, args_str: str) -> bool:
     """Run an individual agent script with arguments"""
     print(f"\n{'='*80}")
-    print(f"🚀 STARTING: {description}")
+    print(f"[>>] STARTING: {description}")
     print(f"📄 Script: {agent_script}")
-    print(f"⏰ Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[T] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*80}")
 
     start_time = time.time()
@@ -37,11 +37,11 @@ def run_agent(agent_script: str, description: str, args_str: str) -> bool:
     duration = time.time() - start_time
 
     if exit_code == 0:
-        print(f"\n✅ COMPLETED: {description}")
-        print(f"⏱️ Duration: {duration:.2f} seconds ({duration/60:.1f} minutes)")
+        print(f"\n[OK] COMPLETED: {description}")
+        print(f"[T] Duration: {duration:.2f} seconds ({duration/60:.1f} minutes)")
         return True
     else:
-        print(f"\n❌ FAILED: {description}")
+        print(f"\n[FAIL] FAILED: {description}")
         print(f"💥 Exit code: {exit_code}")
         return False
 
@@ -61,9 +61,9 @@ def main():
 
     print("🌟 MULTI-AGENT OOD DETECTION FRAMEWORK (LLaVA-7B LOCAL)")
     print("=" * 80)
-    print(f"📂 Input Directory: {args.image_dir}")
+    print(f"[>] Input Directory: {args.image_dir}")
     print(f"📁 Output Directory: {args.output_dir}")
-    print(f"⏱️ Request Delay: {args.delay} seconds")
+    print(f"[T] Request Delay: {args.delay} seconds")
     print(f"🔗 Backend: HuggingFace LLaVA-1.5-7B (local)")
     print(f"🕐 Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
@@ -131,16 +131,16 @@ def main():
 
     print(f"\n{'='*80}")
     print("🎊 EXECUTION SUMMARY")
-    print(f"✅ Successful Agents: {len(successful_agents)}/5")
-    print(f"❌ Failed Agents: {len(failed_agents)}/5")
+    print(f"[OK] Successful Agents: {len(successful_agents)}/5")
+    print(f"[FAIL] Failed Agents: {len(failed_agents)}/5")
 
     final_output = os.path.join(args.output_dir, agent_outputs["agent5"])
     if os.path.exists(final_output):
-        print(f"\n🎯 FINAL OUTPUT READY:")
+        print(f"\n[>] FINAL OUTPUT READY:")
         print(f"📄 {final_output}")
-        print("🚀 Ready for GroundedSAM evaluation!")
+        print("[>>] Ready for GroundedSAM evaluation!")
     else:
-        print("\n⚠️ Final synthesis file not found!")
+        print("\n[WARN] Final synthesis file not found!")
 
     print(f"\n🏁 Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)

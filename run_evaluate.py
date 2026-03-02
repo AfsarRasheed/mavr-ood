@@ -1188,10 +1188,10 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                                 cv2.imwrite(heatmap_path, cv2.cvtColor(heatmap_overlay, cv2.COLOR_RGB2BGR))
                                 print(f"✓ CLIP heatmap saved: {image_name}_clip_heatmap.jpg")
                             else:
-                                print(f"⚠️ CLIP heatmap returned None for {image_name}")
+                                print(f"[WARN] CLIP heatmap returned None for {image_name}")
                         except Exception as e:
                             import traceback
-                            print(f"⚠️ CLIP heatmap generation failed: {e}")
+                            print(f"[WARN] CLIP heatmap generation failed: {e}")
                             traceback.print_exc()
                     
                     # NEW: Save Agent Summary Dashboard
@@ -1287,12 +1287,12 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
     print(f"Detection rate: {success_count/len(dataset)*100:.1f}%")
     
     if failed_images:
-        print(f"\n⚠️  Failed images ({len(failed_images)}):")
+        print(f"\n[WARN]  Failed images ({len(failed_images)}):")
         for img in failed_images:
             print(f"   - {img}")
     
     if prompt_missing_images:
-        print(f"\n⚠️  Images with missing prompts ({len(prompt_missing_images)}):")
+        print(f"\n[WARN]  Images with missing prompts ({len(prompt_missing_images)}):")
         for img in prompt_missing_images:
             print(f"   - {img}")
     
@@ -1932,7 +1932,7 @@ if __name__ == "__main__":
     
     # select evaluation method
     if args.multiagent_prompts:
-        print("🤖 Running evaluation with multi-agent prompts...")
+        print("[i] Running evaluation with multi-agent prompts...")
         print(f"   Prompts JSON: {args.multiagent_prompts}")
         
         # load multi-agent prompts
@@ -1945,7 +1945,7 @@ if __name__ == "__main__":
         # Initialize CLIP verifier
         clip_verifier = None
         if args.clip_threshold > 0:
-            print(f"🔍 Initializing CLIP verifier (threshold={args.clip_threshold})...")
+            print(f"[*] Initializing CLIP verifier (threshold={args.clip_threshold})...")
             clip_verifier = CLIPVerifier(
                 device=args.device,
                 similarity_threshold=args.clip_threshold
@@ -1965,7 +1965,7 @@ if __name__ == "__main__":
         
     elif args.optimize_thresholds:
         print("🔧 Running evaluation with per-image threshold optimization...")
-        print("⚠️  This will be significantly slower but more accurate")
+        print("[WARN]  This will be significantly slower but more accurate")
         print(f"   Text prompt: {args.text_prompt}")
         
         # evaluate with threshold optimization
@@ -1979,7 +1979,7 @@ if __name__ == "__main__":
         )
         
     else:
-        print(f"🚀 Running evaluation with fixed thresholds...")
+        print(f"[>>] Running evaluation with fixed thresholds...")
         print(f"   Text prompt: {args.text_prompt}")
         print(f"   Box threshold: {args.box_threshold}")
         print(f"   Text threshold: {args.text_threshold}")
@@ -1996,8 +1996,8 @@ if __name__ == "__main__":
             device=args.device
         )
     
-    print("\n✅ Evaluation completed!")
+    print("\n[OK] Evaluation completed!")
     if metrics:
-        print("📊 Check the output directory for detailed results and visualizations.")
+        print("[i] Check the output directory for detailed results and visualizations.")
     else:
-        print("❌ No successful evaluations were completed.")
+        print("[FAIL] No successful evaluations were completed.")

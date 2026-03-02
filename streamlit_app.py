@@ -64,7 +64,7 @@ from app import (
 # =====================
 st.set_page_config(
     page_title="MAVR-OOD",
-    page_icon="🔍",
+    page_icon="[*]",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -165,7 +165,7 @@ st.markdown("""
 # Sidebar
 # =====================
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("[*] Settings")
 
     clip_threshold = st.slider(
         "CLIP Threshold",
@@ -198,7 +198,7 @@ with st.sidebar:
 # =====================
 # Tabs
 # =====================
-tab1, tab2 = st.tabs(["📷 Single Image", "📁 Batch Evaluation"])
+tab1, tab2 = st.tabs(["[i] Single Image", "[>] Batch Evaluation"])
 
 
 # =====================
@@ -227,7 +227,7 @@ with tab1:
 
         st.image(image_pil, caption="Uploaded Image", use_container_width=True)
 
-        run_button = st.button("🚀 Run Detection", type="primary", use_container_width=True)
+        run_button = st.button("[>>] Run Detection", type="primary", use_container_width=True)
 
         if run_button:
             # Save temp image
@@ -239,24 +239,24 @@ with tab1:
             status = st.status("Running multi-agent analysis...", expanded=True)
 
             with status:
-                st.write("🤖 Running Agent 1: Scene Context Analyzer...")
+                st.write("[i] Running Agent 1: Scene Context Analyzer...")
                 agent_results = run_agents_on_image(tmp_path)
-                st.write("✅ All 5 agents completed")
+                st.write("[OK] All 5 agents completed")
 
                 prompt_v1, prompt_v2 = extract_prompts(agent_results)
-                st.write(f"📝 Prompt V1: **{prompt_v1}**")
-                st.write(f"📝 Prompt V2: **{prompt_v2}**")
+                st.write(f"[i] Prompt V1: **{prompt_v1}**")
+                st.write(f"[i] Prompt V2: **{prompt_v2}**")
 
             # === Stage 2: Detection ===
             status2 = st.status("Running detection pipeline...", expanded=True)
 
             with status2:
-                st.write("📦 Loading GroundingDINO...")
+                st.write("[i] Loading GroundingDINO...")
                 gdino = load_gdino_model()
                 predictor = load_sam_predictor()
                 clip_verifier = load_clip_verifier()
 
-                st.write(f"🎯 Detecting with prompt: '{prompt_v1}'...")
+                st.write(f"[>] Detecting with prompt: '{prompt_v1}'...")
                 image_tensor = preprocess_image(image_pil)
 
                 boxes, labels, scores = get_grounding_output(
@@ -265,7 +265,7 @@ with tab1:
                 )
 
                 if len(boxes) == 0 and prompt_v2 != prompt_v1:
-                    st.write(f"🔄 Trying prompt V2: '{prompt_v2}'...")
+                    st.write(f"[>] Trying prompt V2: '{prompt_v2}'...")
                     boxes, labels, scores = get_grounding_output(
                         gdino, image_tensor, prompt_v2,
                         box_threshold=box_threshold, text_threshold=0.25
@@ -273,7 +273,7 @@ with tab1:
 
                 # CLIP verification
                 if len(boxes) > 0:
-                    st.write("🔍 CLIP semantic verification...")
+                    st.write("[*] CLIP semantic verification...")
                     try:
                         H, W = image_np.shape[:2]
                         clip_boxes = boxes.clone()
@@ -295,17 +295,17 @@ with tab1:
                             boxes = boxes_back
                             labels = filtered_phrases
                     except Exception as e:
-                        st.write(f"⚠️ CLIP warning: {e}")
+                        st.write(f"[WARN] CLIP warning: {e}")
 
                 # SAM segmentation
                 masks = None
                 boxes_xyxy = None
                 if len(boxes) > 0:
-                    st.write("🎨 Running SAM segmentation...")
+                    st.write("[>] Running SAM segmentation...")
                     masks, boxes_xyxy = run_sam_segmentation(predictor, image_np, boxes)
-                    st.write(f"✅ Found {len(boxes)} detections")
+                    st.write(f"[OK] Found {len(boxes)} detections")
                 else:
-                    st.write("⚠️ No detections found")
+                    st.write("[WARN] No detections found")
 
                 status2.update(label="Detection complete!", state="complete")
 
@@ -339,7 +339,7 @@ with tab1:
                 # Ground truth comparison
                 if gt_mask_file is not None:
                     st.divider()
-                    st.subheader("📊 Evaluation Metrics")
+                    st.subheader("[i] Evaluation Metrics")
 
                     gt_mask = np.array(Image.open(gt_mask_file).convert("L"))
                     gt_binary = (gt_mask > 0).astype(np.float32)
@@ -394,7 +394,7 @@ with tab1:
 
             # Agent Analysis
             st.divider()
-            st.subheader("🤖 Agent Analysis")
+            st.subheader("[i] Agent Analysis")
 
             for i, (name, key) in enumerate([
                 ("Agent 1 — Scene Context", "agent1"),
@@ -432,7 +432,7 @@ with tab2:
         help="Path to agent5 synthesis results"
     )
 
-    if st.button("🚀 Run Batch Evaluation", type="primary"):
+    if st.button("[>>] Run Batch Evaluation", type="primary"):
         st.info("For batch evaluation, use the command line:")
         st.code(f"""python run_evaluate.py \\
     --config GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py \\
@@ -449,7 +449,7 @@ with tab2:
     results_file = "./outputs/evaluation_results/multiagent_evaluation_results.json"
     if os.path.exists(results_file):
         st.divider()
-        st.subheader("📊 Previous Evaluation Results")
+        st.subheader("[i] Previous Evaluation Results")
         with open(results_file) as f:
             results = json.load(f)
 
@@ -473,7 +473,7 @@ with tab2:
                 name = img_result.get("image_name", "Unknown")
                 status = img_result.get("status", "unknown")
                 metrics = img_result.get("metrics", {})
-                icon = "✅" if status != "failure_no_detection" else "❌"
+                icon = "[OK]" if status != "failure_no_detection" else "[FAIL]"
                 with st.expander(f"{icon} {name}"):
                     st.json(metrics)
 

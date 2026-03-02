@@ -58,7 +58,7 @@ class ReasoningSynthesizer:
     def __init__(self, delay_between_requests: float = 2.0):
         self.delay_between_requests = delay_between_requests
 
-        print("🚀 AGENT 5: Reasoning Synthesizer (LLaVA-7B)")
+        print("[>>] AGENT 5: Reasoning Synthesizer (LLaVA-7B)")
         print("🔗 Integrating multi-agent reasoning")
 
     def synthesize_analysis(self, agent_results: Dict) -> Dict:
@@ -209,14 +209,14 @@ Return ONLY valid JSON following the required schema.
             })
 
             print("  📝 V1:", synthesis.get("grounded_sam_prompts", {}).get("prompt_v1", "N/A"))
-            print("  🎯 Confidence:", synthesis.get("overall_confidence", 0.0))
+            print("  [>] Confidence:", synthesis.get("overall_confidence", 0.0))
 
             time.sleep(self.delay_between_requests)
 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        print(f"\n💾 Final synthesis saved to {output_file}")
+        print(f"\n[>] Final synthesis saved to {output_file}")
 
 
 # =========================
@@ -242,4 +242,4 @@ if __name__ == "__main__":
         args.output_file
     )
 
-    print("\n✅ Agent 5 completed successfully")
+    print("\n[OK] Agent 5 completed successfully")
