@@ -286,7 +286,11 @@ Input Image
 - **Threshold**: Default 0.20 — detections below this similarity score are filtered out
 - **Role**: Sits between GroundingDINO detection and SAM segmentation
 
-**Key Function**: `verify_detections(image, boxes, phrases, text_prompt) → filtered results`
+**Key Functions**: 
+- `verify_detections(image, boxes, phrases, text_prompt) -> filtered results`
+- `generate_heatmap(image, text_prompt) -> numpy heatmap` — extracts spatial similarity from CLIP ViT patch tokens
+
+**Fallback Mechanism**: If CLIP rejects ALL detections, the system retains the highest-scoring detection to avoid losing valid anomalies.
 
 **Why This Module Matters**: GroundingDINO can sometimes detect non-matching regions (false positives). CLIP acts as a semantic "second opinion" — if the cropped region doesn't actually look like the described anomaly, it's filtered out.
 
@@ -414,42 +418,35 @@ Step 2: run_evaluate.py uses Agent 5's prompts
 ## 5. Directory Structure
 
 ```
-MAVR-OOD/
+mavr-ood/
 ├── src/
 │   ├── agents/
-│   │   ├── vlm_backend.py        # LLaVA-7B inference engine
-│   │   ├── agent1.py             # Scene Context Analyzer
-│   │   ├── agent2.py             # Spatial Anomaly Detector
-│   │   ├── agent3.py             # Semantic Inconsistency Analyzer
-│   │   ├── agent4.py             # Visual Appearance Evaluator
-│   │   ├── agent5.py             # Reasoning Synthesizer
-│   │   └── run_all_agents.py     # Master orchestrator script
-│   └── clip_verifier.py          # CLIP semantic verification
-├── GroundingDINO/                 # Open-vocabulary detector
-│   └── groundingdino/
-│       ├── models/GroundingDINO/  # Model architecture
-│       ├── config/                # Model configurations
-│       └── util/                  # Utilities (inference, slconfig)
-├── segment_anything/              # SAM segmentation
-│   └── segment_anything/
-│       ├── build_sam.py           # Model builder
-│       ├── predictor.py           # SamPredictor
-│       └── modeling/              # ViT encoder, decoder
+│   │   ├── agent1.py              # Scene Context Analyzer
+│   │   ├── agent2.py              # Spatial Anomaly Detector
+│   │   ├── agent3.py              # Semantic Inconsistency Analyzer
+│   │   ├── agent4.py              # Visual Appearance Evaluator
+│   │   ├── agent5.py              # Reasoning Synthesizer
+│   │   ├── run_all_agents.py      # Sequential agent runner
+│   │   └── vlm_backend.py         # LLaVA-7B inference backend
+│   └── clip_verifier.py           # CLIP semantic verification + heatmap
+├── GroundingDINO/                 # GroundingDINO (object detection)
+├── segment_anything/              # SAM (segmentation)
 ├── data/
-│   └── challenging_subset/
+│   └── challenging_subset/        # 13 test images and labels
 │       ├── original/              # Input images (13 road scenes)
 │       └── labels/                # Ground truth masks
 ├── weights/                       # Model checkpoints
 │   ├── groundingdino_swint_ogc.pth
 │   └── sam_vit_h_4b8939.pth
 ├── outputs/                       # Pipeline outputs
-│   ├── challenging_subset_prompts/# Agent JSON results
+│   ├── challenging_subset_prompts/ # Agent JSON results
 │   └── evaluation_results/        # Evaluation visualizations
 ├── dataset.py                     # Dataset loaders (Road Anomaly, Fishyscapes, SegmentMe)
-├── run_evaluate.py                # Full evaluation pipeline
+├── run_evaluate.py                # Full evaluation pipeline + visualizations
 ├── app.py                         # Gradio web frontend
-├── fix_colab_compat.py            # Colab compatibility patcher
+├── streamlit_app.py               # Streamlit web frontend
 ├── COLAB_RUN.md                   # Colab execution guide
+├── PROJECT_DOCUMENTATION.md       # Detailed project documentation
 └── requirements.txt               # Python dependencies
 ```
 

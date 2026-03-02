@@ -177,7 +177,7 @@ Features:
 - **Single Image**: Upload any road scene and detect anomalous objects
 - **Batch Dataset**: Run full pipeline on a dataset folder
 - Adjustable CLIP and Box thresholds
-- Visualizations: Bounding boxes, CLIP heatmap, SAM masks, pipeline view
+- Visualizations: Bounding boxes, SAM masks, pipeline progression view
 - Full agent analysis breakdown with confidence scores
 
 ---
