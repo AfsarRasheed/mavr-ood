@@ -446,7 +446,6 @@ def save_confusion_matrix(tp, fp, tn, fn, save_path):
     except Exception as e:
         print(f"Warning: Failed to save confusion matrix: {str(e)}")
 
->>>>>>> 62a4554 (Implement System Global Pixel Confusion Matrix heatmap generation in run_evaluate batch mode and update Colab docs)
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
