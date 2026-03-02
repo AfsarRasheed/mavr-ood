@@ -639,17 +639,21 @@ def load_multiagent_prompts(json_path):
                         final_prompts = sr
                 
                 if final_prompts and 'prompt_v1' in final_prompts and 'prompt_v2' in final_prompts:
-                    # Extract reasoning correctly handling different potential keys
+                    # Extract reasoning and confidence from synthesis_result (NOT from grounded_sam_prompts)
                     reasoning = ""
+                    overall_confidence = 0.0
+                    detection_confidence = 0.0
                     if 'synthesis_result' in result:
                         sr = result['synthesis_result']
                         reasoning = sr.get('anomaly_reasoning', sr.get('reasoning', ''))
+                        overall_confidence = sr.get('overall_confidence', 0.0)
+                        detection_confidence = sr.get('detection_confidence', 0.0)
                     
                     prompt_dict[image_name] = {
                         'prompt_v1': final_prompts['prompt_v1'],
                         'prompt_v2': final_prompts['prompt_v2'],
-                        'overall_confidence': final_prompts.get('overall_confidence', 0.0),
-                        'detection_confidence': final_prompts.get('detection_confidence', 0.0),
+                        'overall_confidence': overall_confidence,
+                        'detection_confidence': detection_confidence,
                         'reasoning': reasoning
                     }
         
@@ -672,8 +676,8 @@ def load_multiagent_prompts(json_path):
 
 def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device="cpu", clip_verifier=None):
 
-    box_thresholds = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
-    text_thresholds = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+    box_thresholds = [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+    text_thresholds = [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
     
     best_metrics = {'mIoU': 0, 'F1': 0}
     best_thresholds = {'box_threshold': 0.3, 'text_threshold': 0.25}
