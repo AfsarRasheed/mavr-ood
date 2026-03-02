@@ -448,29 +448,8 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
                 boxes = boxes_back
                 labels = filtered_phrases
                 
-            # NEW: Generate Visualization Heatmap (separate try-except so CLIP verification still works even if heatmap fails)
-            try:
-                import cv2
-                progress(0.78, desc="[i] Generating CLIP Heatmap...")
-                heatmap_raw = clip_verifier.generate_heatmap(image_np, prompt_v1)
-                if heatmap_raw is not None:
-                    heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
-                    heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-                    heatmap_img = cv2.addWeighted(image_np, 0.5, heatmap_colored, 0.5, 0)
-                    print(f"[OK] CLIP heatmap generated successfully")
-                else:
-                    print(f"[WARN] CLIP heatmap returned None")
-                    heatmap_img = image_np.copy()
-            except Exception as heatmap_err:
-                print(f"[WARN] CLIP heatmap generation failed: {heatmap_err}")
-                import traceback
-                traceback.print_exc()
-                heatmap_img = image_np.copy()
         except Exception as e:
             print(f"CLIP verification warning: {e}")
-            heatmap_img = image_np.copy()
-    else:
-        heatmap_img = image_np.copy()
 
     # SAM Segmentation
     if len(boxes) > 0:
@@ -497,7 +476,7 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
     # Format agent analysis text
     analysis_text = format_analysis(agent_results, prompt_v1, prompt_v2, len(boxes))
 
-    return detection_img, heatmap_img, mask_img, binary_img, pipeline_img, analysis_text
+    return detection_img, mask_img, binary_img, pipeline_img, analysis_text
 
 def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
     """Format agent analysis for display."""
@@ -705,10 +684,9 @@ def build_app():
                                 pipeline_output = gr.Image(label="[i] Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
                                 
                                 with gr.Row():
-                                    det_output = gr.Image(label="🟩 Bounding Boxes", height=250)
-                                    heatmap_output = gr.Image(label="[i] CLIP Verifier Heatmap", height=250)
-                                    mask_output = gr.Image(label="[>] SAM Masks", height=250)
-                                    binary_output = gr.Image(label="🩷 Final OOD Mask", height=250)
+                                    det_output = gr.Image(label="Bounding Boxes", height=250)
+                                    mask_output = gr.Image(label="SAM Masks", height=250)
+                                    binary_output = gr.Image(label="Final OOD Mask", height=250)
                                     
                             with gr.TabItem("[i] Agent Logs & Reasoning"):
                                 analysis_output = gr.Textbox(
@@ -720,7 +698,7 @@ def build_app():
                 run_single_btn.click(
                     fn=process_single_image,
                     inputs=[input_image, clip_thresh, box_thresh],
-                    outputs=[det_output, heatmap_output, mask_output, binary_output, pipeline_output, analysis_output],
+                    outputs=[det_output, mask_output, binary_output, pipeline_output, analysis_output],
                 )
 
             # ==================
