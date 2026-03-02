@@ -45,6 +45,7 @@ Image → Agent 1 (Scene Context)     ─┐
 
 | Dataset | mIoU | F1 | Precision | Recall | Detection Rate |
 |---------|------|-----|-----------|--------|----------------|
+| Test Image (Horse) | 0.9629 | 0.9811 | 0.9871 | 0.9752 | 100% |
 | Test Image (Zebras) | 0.9741 | 0.9869 | 0.9904 | 0.9834 | 100% |
 
 ---
@@ -92,19 +93,12 @@ Image → Agent 1 (Scene Context)     ─┐
 
 ## 📊 Data Preparation
 
-### 1. Download Datasets
 Our framework is evaluated on standard OOD benchmarks:
 * [RoadAnomaly Dataset](https://www.epfl.ch/labs/cvlab/data/road-anomaly/)
 * [Fishyscapes Dataset](https://fishyscapes.com/dataset)
 * [SMIYC Dataset](https://segmentmeifyoucan.com/datasets)
 
-### 2. Reconstruct the Challenging Subset
-```bash
-python scripts/reconstruct_subset.py \
-    --original_dir /path/to/your/RoadAnomaly \
-    --id_file data/challenging_subset_ids.txt \
-    --output_dir ./data/challenging_subset
-```
+A pre-built challenging subset of 13 images is included at `data/challenging_subset/`.
 
 ---
 
@@ -146,6 +140,22 @@ python run_evaluate.py \
 
 Results, logs, and visualizations will be saved in `./outputs/evaluation_results`.
 
+### Output Visualizations
+
+For each image, the pipeline generates:
+
+| Visualization | Description |
+|---|---|
+| `_pipeline_vis.jpg` | 3-panel view: Input + VLM Reasoning → GroundingDINO + CLIP → SAM Segmentation |
+| `_agent_summary.jpg` | Multi-agent dashboard showing all 5 agents' findings with confidence |
+| `_spider_chart.jpg` | Radar chart of evaluation metrics |
+| `_metrics_bar.jpg` | Bar chart of metrics (mIoU, F1, Precision, Recall) |
+| `_clip_heatmap.jpg` | CLIP semantic similarity heatmap overlay |
+
+For batch runs, additional aggregate visualizations are generated:
+- `confidence_vs_miou_scatter.jpg` — System self-awareness scatter plot
+- `batch_confusion_matrix.jpg` — Global pixel-level confusion matrix
+
 ---
 
 ## 🌐 Gradio Demo
@@ -167,8 +177,8 @@ Features:
 - **Single Image**: Upload any road scene and detect anomalous objects
 - **Batch Dataset**: Run full pipeline on a dataset folder
 - Adjustable CLIP and Box thresholds
-- Visualizations: Bounding boxes, SAM masks, Final OOD mask
-- Full agent analysis breakdown
+- Visualizations: Bounding boxes, CLIP heatmap, SAM masks, pipeline view
+- Full agent analysis breakdown with confidence scores
 
 ---
 
@@ -178,23 +188,25 @@ Features:
 mavr-ood/
 ├── src/
 │   ├── agents/
-│   │   ├── agent1.py          # Scene Context Analyzer
-│   │   ├── agent2.py          # Spatial Anomaly Detector
-│   │   ├── agent3.py          # Semantic Inconsistency Analyzer
-│   │   ├── agent4.py          # Visual Appearance Evaluator
-│   │   ├── agent5.py          # Reasoning Synthesizer
-│   │   ├── run_all_agents.py  # Sequential agent runner
-│   │   └── vlm_backend.py     # LLaVA-7B inference backend
-│   └── clip_verifier.py       # CLIP semantic verification
-├── GroundingDINO/              # GroundingDINO (object detection)
-├── segment_anything/           # SAM (segmentation)
-├── run_evaluate.py             # Evaluation pipeline
-├── app.py                      # Gradio web interface
-├── dataset.py                  # Dataset loaders
+│   │   ├── agent1.py            # Scene Context Analyzer
+│   │   ├── agent2.py            # Spatial Anomaly Detector
+│   │   ├── agent3.py            # Semantic Inconsistency Analyzer
+│   │   ├── agent4.py            # Visual Appearance Evaluator
+│   │   ├── agent5.py            # Reasoning Synthesizer
+│   │   ├── run_all_agents.py    # Sequential agent runner
+│   │   └── vlm_backend.py       # LLaVA-7B inference backend
+│   └── clip_verifier.py         # CLIP semantic verification + heatmap
+├── GroundingDINO/                # GroundingDINO (object detection)
+├── segment_anything/             # SAM (segmentation)
+├── run_evaluate.py               # Evaluation pipeline + visualizations
+├── app.py                        # Gradio web interface
+├── streamlit_app.py              # Streamlit web interface
+├── dataset.py                    # Dataset loaders
 ├── data/
-│   └── challenging_subset/     # Test images and labels
-├── weights/                    # Model weights (downloaded)
-├── COLAB_RUN.md                # Google Colab guide
+│   └── challenging_subset/       # 13 test images and labels
+├── weights/                      # Model weights (downloaded)
+├── COLAB_RUN.md                  # Google Colab step-by-step guide
+├── PROJECT_DOCUMENTATION.md      # Detailed project documentation
 └── requirements.txt
 ```
 
