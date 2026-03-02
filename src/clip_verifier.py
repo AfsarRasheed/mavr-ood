@@ -124,6 +124,9 @@ class CLIPVerifier:
         verified_phrases = []
         clip_scores = []
         verified_det_scores = []
+        
+        # Track ALL scores so we can fallback to the best one if all are rejected
+        all_scores_info = []
 
         for i in range(len(boxes)):
             crop = self.crop_detection(image, boxes[i])
@@ -132,6 +135,7 @@ class CLIPVerifier:
 
             # Compute CLIP similarity
             similarity = self.compute_similarity(crop, text_prompt)
+            all_scores_info.append((i, similarity))
 
             if similarity >= self.similarity_threshold:
                 verified_boxes.append(boxes[i])
@@ -139,6 +143,19 @@ class CLIPVerifier:
                 clip_scores.append(similarity)
                 if scores is not None:
                     verified_det_scores.append(scores[i])
+
+        # FALLBACK: If ALL boxes were rejected by CLIP, keep the best-scoring one
+        # This prevents total detection failure for valid but low-confidence matches
+        if len(verified_boxes) == 0 and len(all_scores_info) > 0:
+            best_idx, best_score = max(all_scores_info, key=lambda x: x[1])
+            print(f"   ⚠️ CLIP rejected all {len(all_scores_info)} detections "
+                  f"(best={best_score:.3f}, threshold={self.similarity_threshold:.2f}). "
+                  f"Keeping best detection as fallback.")
+            verified_boxes.append(boxes[best_idx])
+            verified_phrases.append(phrases[best_idx])
+            clip_scores.append(best_score)
+            if scores is not None:
+                verified_det_scores.append(scores[best_idx])
 
         if len(verified_boxes) == 0:
             return (torch.zeros(0, 4), [], [], 
@@ -148,6 +165,7 @@ class CLIPVerifier:
         filtered_det_scores = (torch.stack(verified_det_scores) 
                                if verified_det_scores else None)
 
+        n_filtered = len(boxes) - len(verified_boxes)
         if n_filtered > 0:
             print(f"   🔍 CLIP filtered {n_filtered}/{len(boxes)} detections "
                   f"(threshold={self.similarity_threshold:.2f})")
