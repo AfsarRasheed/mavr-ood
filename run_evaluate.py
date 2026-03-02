@@ -978,6 +978,20 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                         save_path=os.path.join(output_dir, f"{image_name}_spider_chart.jpg"),
                         title=f"System Balance Radar for {image_name}"
                     )
+                    
+                    # NEW: Save CLIP Verifier Heatmap
+                    if clip_verifier is not None:
+                        try:
+                            heatmap_raw = clip_verifier.generate_heatmap(image_cv, prompt_v1)
+                            if heatmap_raw is not None:
+                                heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
+                                heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+                                heatmap_overlay = cv2.addWeighted(image_cv, 0.5, heatmap_colored, 0.5, 0)
+                                heatmap_path = os.path.join(output_dir, f"{image_name}_clip_heatmap.jpg")
+                                cv2.imwrite(heatmap_path, cv2.cvtColor(heatmap_overlay, cv2.COLOR_RGB2BGR))
+                                print(f"✓ CLIP heatmap saved: {image_name}_clip_heatmap.jpg")
+                        except Exception as e:
+                            print(f"⚠️ CLIP heatmap generation failed: {e}")
             else:
                 print(f"✗ {image_name}: Evaluation failed")
                 failed_images.append(image_name)
