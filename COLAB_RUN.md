@@ -122,12 +122,6 @@ print("🎯 SYSTEM BALANCE (RADAR CHART)")
 for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
-
-print("\n" + "="*60)
-print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
-for r in sorted(glob.glob("outputs/test_single_results/*_scatter.jpg")):
-    print(f"\n📊 {os.path.basename(r)}")
-    display(IPImage(r, width=800))
 ```
 
 ---
@@ -194,25 +188,13 @@ print("🎯 SYSTEM BALANCE (RADAR CHART)")
 for r in sorted(glob.glob("outputs/evaluation_results/*_spider_chart.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
-
-print("\n" + "="*60)
-print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
-for r in sorted(glob.glob("outputs/evaluation_results/*_scatter.jpg")):
-    print(f"\n📊 {os.path.basename(r)}")
-    display(IPImage(r, width=800))
-
-print("\n" + "="*60)
-print("🧮 SYSTEM CONFUSION MATRIX")
-from IPython.display import display, Image as IPImage
-if os.path.exists("outputs/evaluation_results/batch_confusion_matrix.jpg"):
-    display(IPImage("outputs/evaluation_results/batch_confusion_matrix.jpg", width=800))
 ```
 
 ---
 ## Phase 3: Web App (Optional — choose one)
 
 ### Option A — Advanced Gradio Dashboard (Recommended)
-Launch the beautiful new Gradio UI that includes live visual analytics, reasoning logs, and the new 🔥 **CLIP Verifier Heatmap**!
+Launch the beautiful new Gradio UI that includes live visual analytics and reasoning logs!
 ```python
 import app
 demo = app.build_app()
