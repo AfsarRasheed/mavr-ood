@@ -1178,6 +1178,7 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                     # NEW: Save CLIP Verifier Heatmap
                     if clip_verifier is not None:
                         try:
+                            print(f"  Generating CLIP heatmap for prompt: '{prompt_v1}'...")
                             heatmap_raw = clip_verifier.generate_heatmap(image_cv, prompt_v1)
                             if heatmap_raw is not None:
                                 heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
@@ -1186,8 +1187,12 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                                 heatmap_path = os.path.join(output_dir, f"{image_name}_clip_heatmap.jpg")
                                 cv2.imwrite(heatmap_path, cv2.cvtColor(heatmap_overlay, cv2.COLOR_RGB2BGR))
                                 print(f"✓ CLIP heatmap saved: {image_name}_clip_heatmap.jpg")
+                            else:
+                                print(f"⚠️ CLIP heatmap returned None for {image_name}")
                         except Exception as e:
+                            import traceback
                             print(f"⚠️ CLIP heatmap generation failed: {e}")
+                            traceback.print_exc()
                     
                     # NEW: Save Agent Summary Dashboard
                     if prompts_dir is not None:
