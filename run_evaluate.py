@@ -461,15 +461,15 @@ def save_agent_summary_dashboard(image_name, prompts_dir, save_path):
         
         # Agent config: (file_pattern, title, emoji, key_extractor)
         agent_configs = [
-            ("agent1_scene_context_results.json", "Agent 1: Scene Context Analyzer", "🔍",
+            ("agent1_scene_context_results.json", "Agent 1: Scene Context Analyzer", "[1]",
              lambda r: _extract_agent1(r)),
-            ("agent2_spatial_anomaly_results.json", "Agent 2: Spatial Anomaly Detector", "📍",
+            ("agent2_spatial_anomaly_results.json", "Agent 2: Spatial Anomaly Detector", "[2]",
              lambda r: _extract_agent2(r)),
-            ("agent3_semantic_inconsistency_results.json", "Agent 3: Semantic Inconsistency", "🧠",
+            ("agent3_semantic_inconsistency_results.json", "Agent 3: Semantic Inconsistency", "[3]",
              lambda r: _extract_agent3(r)),
-            ("agent4_visual_appearance_results.json", "Agent 4: Visual Appearance", "👁️",
+            ("agent4_visual_appearance_results.json", "Agent 4: Visual Appearance", "[4]",
              lambda r: _extract_agent4(r)),
-            ("agent5_final_synthesis_results.json", "Agent 5: Final Synthesis", "⚡",
+            ("agent5_final_synthesis_results.json", "Agent 5: Final Synthesis", "[5]",
              lambda r: _extract_agent5(r)),
         ]
         

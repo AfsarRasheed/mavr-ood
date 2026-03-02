@@ -238,6 +238,6 @@ class CLIPVerifier:
         
         # Resize to match original image dimensions
         H, W = image.shape[:2]
-        heatmap = cv2.resize(similarity_map, (W, H), interpolation=cv2.INTER_CUBIC)
+        heatmap = cv2.resize(similarity_map.astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
         
         return heatmap
