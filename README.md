@@ -11,7 +11,7 @@ To address these fundamental limitations, we propose a novel multi-agent visual 
 
 ## Architecture
 
-<img width="758" height="437" alt="image" src="https://github.com/user-attachments/assets/99081251-5ae9-4672-bfea-5475f181b938" />
+<img alt="MAVR-OOD Architecture" src="assets/architecture_diagram.png" />
 
 ### Pipeline Overview
 
