@@ -446,6 +446,202 @@ def save_confusion_matrix(tp, fp, tn, fn, save_path):
     except Exception as e:
         print(f"Warning: Failed to save confusion matrix: {str(e)}")
 
+
+def save_agent_summary_dashboard(image_name, prompts_dir, save_path):
+    """
+    Creates a professional dashboard showing all 5 agent results as colored blocks.
+    
+    Args:
+        image_name: name of the image being analyzed
+        prompts_dir: directory containing agent JSON output files
+        save_path: where to save the dashboard image
+    """
+    try:
+        import textwrap
+        
+        # Agent config: (file_pattern, title, emoji, key_extractor)
+        agent_configs = [
+            ("agent1_scene_context_results.json", "Agent 1: Scene Context Analyzer", "🔍",
+             lambda r: _extract_agent1(r)),
+            ("agent2_spatial_anomaly_results.json", "Agent 2: Spatial Anomaly Detector", "📍",
+             lambda r: _extract_agent2(r)),
+            ("agent3_semantic_inconsistency_results.json", "Agent 3: Semantic Inconsistency", "🧠",
+             lambda r: _extract_agent3(r)),
+            ("agent4_visual_appearance_results.json", "Agent 4: Visual Appearance", "👁️",
+             lambda r: _extract_agent4(r)),
+            ("agent5_final_synthesis_results.json", "Agent 5: Final Synthesis", "⚡",
+             lambda r: _extract_agent5(r)),
+        ]
+        
+        fig, axes = plt.subplots(5, 1, figsize=(14, 12))
+        fig.suptitle(f"Multi-Agent Analysis Dashboard\n{image_name}", 
+                     fontsize=16, weight='bold', y=0.98)
+        
+        for idx, (filename, title, emoji, extractor) in enumerate(agent_configs):
+            ax = axes[idx]
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+            
+            # Load agent data
+            json_path = os.path.join(prompts_dir, filename)
+            confidence = 0.0
+            details = "No data available"
+            
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path) as f:
+                        data = json.load(f)
+                    # Find the result for this image
+                    for result in data.get("results", []):
+                        if result.get("image", "") == image_name:
+                            confidence, details = extractor(result)
+                            break
+                except Exception:
+                    details = "Error reading agent output"
+            
+            # Color based on confidence
+            if confidence >= 0.7:
+                border_color = '#27ae60'  # Green
+                bg_color = '#eafaf1'
+            elif confidence >= 0.4:
+                border_color = '#f39c12'  # Yellow/Orange
+                bg_color = '#fef9e7'
+            else:
+                border_color = '#e74c3c'  # Red
+                bg_color = '#fdedec'
+            
+            # Draw block background
+            from matplotlib.patches import FancyBboxPatch
+            rect = FancyBboxPatch((0.01, 0.05), 0.98, 0.9, 
+                                   boxstyle="round,pad=0.02",
+                                   facecolor=bg_color, edgecolor=border_color, 
+                                   linewidth=3)
+            ax.add_patch(rect)
+            
+            # Left colored bar
+            bar = FancyBboxPatch((0.01, 0.05), 0.02, 0.9,
+                                  boxstyle="round,pad=0.01",
+                                  facecolor=border_color, edgecolor=border_color)
+            ax.add_patch(bar)
+            
+            # Title and confidence
+            conf_str = f"{confidence:.2f}" if confidence > 0 else "N/A"
+            ax.text(0.05, 0.75, f"{emoji}  {title}", fontsize=12, weight='bold',
+                    verticalalignment='center', transform=ax.transAxes)
+            ax.text(0.92, 0.75, f"Confidence: {conf_str}", fontsize=11, weight='bold',
+                    color=border_color, verticalalignment='center', 
+                    horizontalalignment='right', transform=ax.transAxes)
+            
+            # Details (wrapped text)
+            wrapped = textwrap.fill(details, width=120)
+            ax.text(0.05, 0.30, wrapped, fontsize=9, verticalalignment='center',
+                    transform=ax.transAxes, style='italic', color='#2c3e50')
+        
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.savefig(save_path, dpi=200, bbox_inches="tight", facecolor='white')
+        plt.close(fig)
+        print(f"✓ Agent summary dashboard saved: {os.path.basename(save_path)}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save agent summary dashboard: {str(e)}")
+
+
+def _extract_agent1(result):
+    """Extract key info from Agent 1 output."""
+    analysis = result.get("scene_context_analysis", {})
+    scene = analysis.get("scene_analysis", {})
+    baseline = analysis.get("contextual_baseline", {})
+    conf = analysis.get("context_confidence", 0.0)
+    
+    scene_type = scene.get("scene_type", "unknown")
+    road = scene.get("road_infrastructure", "unknown")
+    env = scene.get("environmental_conditions", {})
+    weather = env.get("weather", "N/A") if isinstance(env, dict) else "N/A"
+    lighting = env.get("lighting", "N/A") if isinstance(env, dict) else "N/A"
+    expected = baseline.get("expected_objects", [])
+    expected_str = ", ".join(expected) if isinstance(expected, list) else str(expected)
+    
+    details = f"Scene: {scene_type} | Road: {road} | Weather: {weather} | Lighting: {lighting} | Expected objects: {expected_str}"
+    return conf, details
+
+
+def _extract_agent2(result):
+    """Extract key info from Agent 2 output."""
+    analysis = result.get("spatial_anomaly_analysis", {})
+    conf = analysis.get("spatial_confidence", 0.0)
+    
+    objects = analysis.get("objects_on_road", "N/A")
+    violations = analysis.get("positioning_violations", "N/A")
+    hazards = analysis.get("safety_hazards", "N/A")
+    
+    details = f"Objects on road: {objects} | Violations: {violations} | Safety: {hazards}"
+    return conf, details[:300]
+
+
+def _extract_agent3(result):
+    """Extract key info from Agent 3 output."""
+    analysis = result.get("semantic_inconsistency_analysis", {})
+    
+    if "error" in analysis:
+        # JSON parsing failed but raw response might have useful info
+        conf = 0.0
+        raw = analysis.get("raw_response", "")
+        # Try to extract confidence from raw response
+        import re
+        conf_match = re.search(r'"semantic_confidence":\s*([\d.]+)', raw)
+        if conf_match:
+            conf = float(conf_match.group(1))
+        details = f"JSON parsing failed (raw output processed by Agent 5)"
+        return conf, details
+    
+    conf = analysis.get("semantic_confidence", 0.0)
+    
+    # Handle both flat (new) and nested (old) schema
+    detected = analysis.get("detected_objects", "N/A")
+    inappropriate = analysis.get("inappropriate_objects", 
+                    analysis.get("semantic_analysis", {}).get("object_categorization", {}).get("inappropriate", "N/A"))
+    violations = analysis.get("domain_violations", "N/A")
+    
+    if isinstance(detected, list):
+        detected = ", ".join(detected)
+    if isinstance(inappropriate, list):
+        inappropriate = ", ".join(inappropriate)
+    if isinstance(violations, list):
+        violations = "; ".join(violations)
+    
+    details = f"Detected: {detected} | Inappropriate: {inappropriate} | Violations: {str(violations)[:150]}"
+    return conf, details[:300]
+
+
+def _extract_agent4(result):
+    """Extract key info from Agent 4 output."""
+    analysis = result.get("visual_appearance_analysis", {})
+    conf = analysis.get("visual_confidence", 0.0)
+    
+    unusual = analysis.get("most_unusual_object", "N/A")
+    objects = analysis.get("detected_objects", "N/A")
+    colors = analysis.get("color_anomalies", "N/A")
+    condition = analysis.get("overall_condition", "N/A")
+    
+    details = f"Objects: {objects} | Most unusual: {unusual} | Colors: {colors} | Condition: {condition}"
+    return conf, details[:300]
+
+
+def _extract_agent5(result):
+    """Extract key info from Agent 5 output."""
+    syn = result.get("synthesis_result", {})
+    conf = syn.get("overall_confidence", 0.0)
+    
+    prompts = syn.get("grounded_sam_prompts", {})
+    v1 = prompts.get("prompt_v1", "N/A")
+    v2 = prompts.get("prompt_v2", "N/A")
+    anomaly_type = syn.get("anomaly_type", "N/A")
+    reasoning = syn.get("reasoning", "N/A")
+    
+    details = f"Prompt V1: \"{v1}\" | V2: \"{v2}\" | Type: {anomaly_type} | Reasoning: {reasoning[:150]}"
+    return conf, details[:300]
+
 def calculate_iou(pred_mask, gt_mask):
     """Calculate IoU between prediction and ground truth masks"""
     intersection = np.logical_and(pred_mask, gt_mask)
@@ -783,7 +979,7 @@ def optimize_thresholds_for_prompt(model, predictor, sample, text_prompt, device
 
 
 def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_dict, 
-                                            output_dir, device="cpu", clip_verifier=None):
+                                            output_dir, device="cpu", clip_verifier=None, prompts_dir=None):
 
     all_metrics = []
     threshold_stats = {'box_thresholds_v1': [], 'text_thresholds_v1': [], 
@@ -992,6 +1188,14 @@ def evaluate_dataset_with_multiagent_prompts(model, predictor, dataset, prompt_d
                                 print(f"✓ CLIP heatmap saved: {image_name}_clip_heatmap.jpg")
                         except Exception as e:
                             print(f"⚠️ CLIP heatmap generation failed: {e}")
+                    
+                    # NEW: Save Agent Summary Dashboard
+                    if prompts_dir is not None:
+                        save_agent_summary_dashboard(
+                            image_name=image_name,
+                            prompts_dir=prompts_dir,
+                            save_path=os.path.join(output_dir, f"{image_name}_agent_summary.jpg")
+                        )
             else:
                 print(f"✗ {image_name}: Evaluation failed")
                 failed_images.append(image_name)
@@ -1750,7 +1954,8 @@ if __name__ == "__main__":
             prompt_dict=prompt_dict,
             output_dir=args.output_dir,
             device=args.device,
-            clip_verifier=clip_verifier
+            clip_verifier=clip_verifier,
+            prompts_dir=os.path.dirname(args.multiagent_prompts)
         )
         
     elif args.optimize_thresholds:

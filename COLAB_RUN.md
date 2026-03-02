@@ -118,6 +118,12 @@ for r in sorted(glob.glob("outputs/test_single_results/*_pipeline_vis.jpg")):
     display(IPImage(r, width=1200))
 
 print("\n" + "="*60)
+print("🤖 MULTI-AGENT ANALYSIS DASHBOARD")
+for r in sorted(glob.glob("outputs/test_single_results/*_agent_summary.jpg")):
+    print(f"\n📋 {os.path.basename(r)}")
+    display(IPImage(r, width=1200))
+
+print("\n" + "="*60)
 print("🎯 SYSTEM BALANCE (RADAR CHART)")
 for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
@@ -193,6 +199,12 @@ print(f"\n{'='*60}")
 print("🧠 PIPELINE REASONING & VISUALIZATION")
 for r in sorted(glob.glob("outputs/evaluation_results/*_pipeline_vis.jpg")):
     print(f"\n📷 {os.path.basename(r)}")
+    display(IPImage(r, width=1200))
+
+print("\n" + "="*60)
+print("🤖 MULTI-AGENT ANALYSIS DASHBOARD")
+for r in sorted(glob.glob("outputs/evaluation_results/*_agent_summary.jpg")):
+    print(f"\n📋 {os.path.basename(r)}")
     display(IPImage(r, width=1200))
 
 print("\n" + "="*60)
