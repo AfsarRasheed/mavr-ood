@@ -108,6 +108,16 @@ class SemanticInconsistencyAnalyzer:
         import re
         # Pre-clean: Fix LLaVA's LaTeX-style escaped underscores
         response = response.replace("\\_", "_")
+        
+        # Pre-clean: Fix common LLaVA bracket/quote mistakes
+        # Fix: "some string value"], → "some string value",
+        response = re.sub(r'"\]\s*,', '",', response)
+        # Fix: "some string value"] → "some string value"
+        response = re.sub(r'"\]\s*\n', '"\n', response)
+        # Fix: trailing comma before closing brace/bracket
+        response = re.sub(r',\s*}', '}', response)
+        response = re.sub(r',\s*]', ']', response)
+        
         try:
             return json.loads(response)
         except Exception:
