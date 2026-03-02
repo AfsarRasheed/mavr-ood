@@ -124,10 +124,16 @@ for r in sorted(glob.glob("outputs/test_single_results/*_spider_chart.jpg")):
     display(IPImage(r, width=600))
 
 print("\n" + "="*60)
-print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
-for r in sorted(glob.glob("outputs/test_single_results/*_scatter.jpg")):
+print("� METRICS BAR CHART")
+for r in sorted(glob.glob("outputs/test_single_results/*_metrics_bar.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=600))
+
+print("\n" + "="*60)
+print("🔥 CLIP VERIFIER HEATMAP")
+for r in sorted(glob.glob("outputs/test_single_results/*_clip_heatmap.jpg")):
+    print(f"\n� {os.path.basename(r)}")
+    display(IPImage(r, width=800))
 ```
 
 ---
@@ -196,14 +202,25 @@ for r in sorted(glob.glob("outputs/evaluation_results/*_spider_chart.jpg")):
     display(IPImage(r, width=600))
 
 print("\n" + "="*60)
+print("📊 METRICS BAR CHART")
+for r in sorted(glob.glob("outputs/evaluation_results/*_metrics_bar.jpg")):
+    print(f"\n📊 {os.path.basename(r)}")
+    display(IPImage(r, width=600))
+
+print("\n" + "="*60)
+print("🔥 CLIP VERIFIER HEATMAP")
+for r in sorted(glob.glob("outputs/evaluation_results/*_clip_heatmap.jpg")):
+    print(f"\n📷 {os.path.basename(r)}")
+    display(IPImage(r, width=800))
+
+print("\n" + "="*60)
 print("📈 SYSTEM SELF-AWARENESS (SCATTER PLOT)")
-for r in sorted(glob.glob("outputs/evaluation_results/*_scatter.jpg")):
+for r in sorted(glob.glob("outputs/evaluation_results/confidence_vs_miou_scatter.jpg")):
     print(f"\n📊 {os.path.basename(r)}")
     display(IPImage(r, width=800))
 
 print("\n" + "="*60)
-print("🧮 SYSTEM CONFUSION Matrix")
-from IPython.display import display, Image as IPImage
+print("🧮 SYSTEM CONFUSION MATRIX")
 if os.path.exists("outputs/evaluation_results/batch_confusion_matrix.jpg"):
     display(IPImage("outputs/evaluation_results/batch_confusion_matrix.jpg", width=800))
 ```
