@@ -448,13 +448,24 @@ def process_single_image(image, clip_threshold, box_threshold, progress=gr.Progr
                 boxes = boxes_back
                 labels = filtered_phrases
                 
-            # NEW: Generate Visualization Heatmap
-            import cv2
-            progress(0.78, desc="🔥 Generating CLIP Heatmap...")
-            heatmap_raw = clip_verifier.generate_heatmap(image_np, prompt_v1)
-            heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
-            heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-            heatmap_img = cv2.addWeighted(image_np, 0.5, heatmap_colored, 0.5, 0)
+            # NEW: Generate Visualization Heatmap (separate try-except so CLIP verification still works even if heatmap fails)
+            try:
+                import cv2
+                progress(0.78, desc="🔥 Generating CLIP Heatmap...")
+                heatmap_raw = clip_verifier.generate_heatmap(image_np, prompt_v1)
+                if heatmap_raw is not None:
+                    heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_raw), cv2.COLORMAP_JET)
+                    heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+                    heatmap_img = cv2.addWeighted(image_np, 0.5, heatmap_colored, 0.5, 0)
+                    print(f"✅ CLIP heatmap generated successfully")
+                else:
+                    print(f"⚠️ CLIP heatmap returned None")
+                    heatmap_img = image_np.copy()
+            except Exception as heatmap_err:
+                print(f"⚠️ CLIP heatmap generation failed: {heatmap_err}")
+                import traceback
+                traceback.print_exc()
+                heatmap_img = image_np.copy()
         except Exception as e:
             print(f"CLIP verification warning: {e}")
             heatmap_img = image_np.copy()
