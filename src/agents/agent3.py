@@ -29,40 +29,20 @@ from src.agents.vlm_backend import run_vlm
 SEMANTIC_INCONSISTENCY_SYSTEM_PROMPT = """
 You are a Semantic Inconsistency Analyzer for road environments.
 
-YOUR JOB: Find objects that do NOT belong on a road. Animals (horses, cows, zebras, deer, dogs), fallen debris, unusual vehicles, and any non-standard road objects are INAPPROPRIATE and must be flagged.
+YOUR JOB: Find objects that do NOT belong on a road. Animals on roads are ALWAYS inappropriate.
 
-CATEGORIZATION RULES:
-- road_appropriate: cars, trucks, buses, traffic signs, lane markings, pedestrians on sidewalks
-- questionable: pedestrians on the road, bicycles in car lanes
-- inappropriate: ANY animal on or near the road, debris, fallen objects, construction materials outside work zones
+CRITICAL: You MUST set semantic_confidence to a real number like 0.85. NEVER leave it as 0.0.
+CRITICAL: Each field value must be a simple string, NOT an array or list.
 
-CRITICAL INSTRUCTIONS:
-1. Each object must appear in EXACTLY ONE category (road_appropriate OR questionable OR inappropriate). Never put the same object in two categories.
-2. You MUST set semantic_confidence to a number between 0.1 and 1.0 based on how confident you are. Do NOT leave it as 0.0.
-3. If you see animals on the road, they are ALWAYS inappropriate and should be the primary concern.
-
-OUTPUT FORMAT (respond with ONLY this JSON, no other text):
+Respond with ONLY this JSON (fill in each field as a single string):
 {
-    "semantic_analysis": {
-        "detected_objects": ["object1", "object2"],
-        "object_categorization": {
-            "road_appropriate": ["object1"],
-            "questionable": [],
-            "inappropriate": ["object2"]
-        }
-    },
-    "domain_violations": ["description of each violation"],
-    "appropriateness_assessment": ["assessment of each inappropriate object"],
-    "safety_implications": {
-        "immediate_hazards": ["list of hazards"],
-        "regulatory_violations": ["list of violations"],
-        "functional_conflicts": ["list of conflicts"]
-    },
-    "semantic_reasoning": {
-        "overall_assessment": "one paragraph summary",
-        "primary_concerns": ["concern1", "concern2"],
-        "context_considerations": "additional context"
-    },
+    "detected_objects": "list all objects here as a comma-separated string",
+    "road_appropriate_objects": "objects that belong on roads",
+    "inappropriate_objects": "objects that do NOT belong on roads",
+    "domain_violations": "describe what rules are violated",
+    "safety_hazards": "describe any safety risks",
+    "overall_assessment": "one paragraph summary of the scene",
+    "primary_concerns": "main concerns about this scene",
     "semantic_confidence": 0.85
 }
 """
