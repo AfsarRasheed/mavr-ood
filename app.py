@@ -3,10 +3,9 @@
 MAVR-OOD Gradio Frontend
 Multi-Agent Visual Reasoning for Out-of-Distribution Object Detection
 
-Three tabs:
-  1. Single Image — upload one image, run full OOD pipeline, see results
-  2. Batch Dataset — run pipeline on entire dataset folder
-  3. Text-Guided Detection — user provides text prompt to detect specific objects
+Two tabs:
+  1. Text-Guided Detection — user provides text prompt to detect specific objects
+  2. OOD Detection — upload a road scene image, run full OOD pipeline
 """
 
 import os
@@ -700,107 +699,7 @@ def build_app():
 
         with gr.Tabs():
             # ==================
-            # Tab 1: Single Image
-            # ==================
-            with gr.TabItem("[i] Single Image Analysis", id="single"):
-                gr.Markdown("Upload a road scene image to generate the full analytical dashboard.")
-
-                with gr.Row():
-                    # Left column: Input and Controls
-                    with gr.Column(scale=1):
-                        input_image = gr.Image(
-                            label="Upload Road Scene Image",
-                            type="numpy",
-                            height=350,
-                        )
-                        run_single_btn = gr.Button(
-                            "[>>] Run Advanced Detection", variant="primary", size="lg"
-                        )
-                        
-                        with gr.Accordion("[*] Advanced Tuning Parameters", open=False):
-                            clip_thresh = gr.Slider(
-                                0.05, 0.5, value=0.20, step=0.05,
-                                label="CLIP Verifier Threshold",
-                                info="Lower = more detections, Higher = strict true positives",
-                            )
-                            box_thresh = gr.Slider(
-                                0.1, 0.5, value=0.3, step=0.05,
-                                label="GroundingDINO Box Threshold",
-                                info="Confidence threshold for initial detection",
-                            )
-
-                    # Right column: Agent Logs and Output Images
-                    with gr.Column(scale=3):
-                        with gr.Tabs():
-                            with gr.TabItem("[i] Visual Dashboard"):
-                                pipeline_output = gr.Image(label="[i] Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
-                                
-                                with gr.Row():
-                                    det_output = gr.Image(label="Bounding Boxes", height=250)
-                                    mask_output = gr.Image(label="SAM Masks", height=250)
-                                    binary_output = gr.Image(label="Final OOD Mask", height=250)
-                                    
-                            with gr.TabItem("[i] Agent Logs & Reasoning"):
-                                analysis_output = gr.Textbox(
-                                    label="Live Agent Synthesis Logs",
-                                    lines=35,
-                                    max_lines=35,
-                                )
-
-                run_single_btn.click(
-                    fn=process_single_image,
-                    inputs=[input_image, clip_thresh, box_thresh],
-                    outputs=[det_output, mask_output, binary_output, pipeline_output, analysis_output],
-                )
-
-            # ==================
-            # Tab 2: Batch Dataset
-            # ==================
-            with gr.TabItem("[>] Batch Dataset", id="batch"):
-                gr.Markdown("Process an entire dataset folder. Default: `./data/challenging_subset`")
-
-                with gr.Row():
-                    dataset_path = gr.Textbox(
-                        value=DEFAULT_DATASET_DIR,
-                        label="Dataset Directory Path",
-                        info="Path to dataset with 'original/' and 'labels/' subfolders",
-                    )
-
-                with gr.Row():
-                    batch_clip_thresh = gr.Slider(
-                        0.05, 0.5, value=0.20, step=0.05,
-                        label="CLIP Threshold",
-                    )
-                    batch_box_thresh = gr.Slider(
-                        0.1, 0.5, value=0.3, step=0.05,
-                        label="Box Threshold",
-                    )
-
-                run_batch_btn = gr.Button(
-                    "[>>] Run Batch Detection", variant="primary", size="lg"
-                )
-
-                batch_gallery = gr.Gallery(
-                    label="📸 Detection Results",
-                    columns=4,
-                    rows=3,
-                    height=500,
-                )
-
-                batch_summary = gr.Textbox(
-                    label="[i] Batch Results Summary",
-                    lines=15,
-                    max_lines=30,
-                )
-
-                run_batch_btn.click(
-                    fn=process_batch,
-                    inputs=[dataset_path, batch_clip_thresh, batch_box_thresh],
-                    outputs=[batch_gallery, batch_summary],
-                )
-
-            # ==================
-            # Tab 3: Text-Guided Detection
+            # Tab 1: Text-Guided Detection
             # ==================
             with gr.TabItem("[i] Text-Guided Detection", id="textguided"):
                 gr.Markdown("""Upload any image and describe the object to find. 
@@ -857,6 +756,60 @@ def build_app():
                     fn=process_text_guided,
                     inputs=[tg_image, tg_prompt, tg_clip_thresh, tg_box_thresh],
                     outputs=[tg_step1, tg_step2, tg_step3, tg_step4, tg_step5, tg_step6, tg_log],
+                )
+
+            # ==================
+            # Tab 2: OOD Single Image Analysis
+            # ==================
+            with gr.TabItem("[i] OOD Detection", id="single"):
+                gr.Markdown("Upload a road scene image to generate the full analytical dashboard.")
+
+                with gr.Row():
+                    # Left column: Input and Controls
+                    with gr.Column(scale=1):
+                        input_image = gr.Image(
+                            label="Upload Road Scene Image",
+                            type="numpy",
+                            height=350,
+                        )
+                        run_single_btn = gr.Button(
+                            "[>>] Run Advanced Detection", variant="primary", size="lg"
+                        )
+                        
+                        with gr.Accordion("[*] Advanced Tuning Parameters", open=False):
+                            clip_thresh = gr.Slider(
+                                0.05, 0.5, value=0.20, step=0.05,
+                                label="CLIP Verifier Threshold",
+                                info="Lower = more detections, Higher = strict true positives",
+                            )
+                            box_thresh = gr.Slider(
+                                0.1, 0.5, value=0.3, step=0.05,
+                                label="GroundingDINO Box Threshold",
+                                info="Confidence threshold for initial detection",
+                            )
+
+                    # Right column: Agent Logs and Output Images
+                    with gr.Column(scale=3):
+                        with gr.Tabs():
+                            with gr.TabItem("[i] Visual Dashboard"):
+                                pipeline_output = gr.Image(label="[i] Pipeline Progression (Agent Reasoning -> CLIP -> SAM)", show_download_button=True)
+                                
+                                with gr.Row():
+                                    det_output = gr.Image(label="Bounding Boxes", height=250)
+                                    mask_output = gr.Image(label="SAM Masks", height=250)
+                                    binary_output = gr.Image(label="Final OOD Mask", height=250)
+                                    
+                            with gr.TabItem("[i] Agent Logs & Reasoning"):
+                                analysis_output = gr.Textbox(
+                                    label="Live Agent Synthesis Logs",
+                                    lines=35,
+                                    max_lines=35,
+                                )
+
+                run_single_btn.click(
+                    fn=process_single_image,
+                    inputs=[input_image, clip_thresh, box_thresh],
+                    outputs=[det_output, mask_output, binary_output, pipeline_output, analysis_output],
                 )
 
         gr.Markdown("""
