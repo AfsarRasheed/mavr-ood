@@ -269,16 +269,19 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             seg_boxes_xyxy[:, 2] = scaled[:, 0] + scaled[:, 2] / 2
             seg_boxes_xyxy[:, 3] = scaled[:, 1] + scaled[:, 3] / 2
 
-            # Move boxes to SAM's device
-            sam_device = sam_predictor.model.device
+            # Get SAM device reliably
+            sam_device = next(sam_predictor.model.parameters()).device
+
+            # apply_boxes_torch uses deepcopy which can strip CUDA device
+            # so we do the transform on CPU, then move result to CUDA
             transformed_boxes = sam_predictor.transform.apply_boxes_torch(
-                seg_boxes_xyxy.to(sam_device), (H, W)
-            )
+                seg_boxes_xyxy, (H, W)
+            ).to(sam_device)
 
             final_masks, _, _ = sam_predictor.predict_torch(
                 point_coords=None,
                 point_labels=None,
-                boxes=transformed_boxes.to(sam_device),
+                boxes=transformed_boxes,
                 multimask_output=False,
             )
             final_masks = final_masks.cpu()
