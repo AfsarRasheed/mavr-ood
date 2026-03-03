@@ -133,6 +133,35 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     from groundingdino.util.utils import get_phrases_from_posmap
 
+    print(f"[OK] GroundingDINO found {len(boxes_filt)} candidates")
+
+    # ---- Retry logic if 0 candidates found ----
+    if len(boxes_filt) == 0:
+        # Retry 1: lower threshold
+        retry_threshold = 0.20
+        print(f"[WARN] 0 candidates — retrying with lower threshold ({retry_threshold})...")
+        filt_mask = logits.max(dim=1)[0] > retry_threshold
+        logits_filt = logits[filt_mask]
+        boxes_filt = boxes_cxcywh[filt_mask]
+        print(f"[i] Retry 1: {len(boxes_filt)} candidates at threshold {retry_threshold}")
+
+    if len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
+        # Retry 2: use raw user prompt
+        raw_caption = user_prompt.lower().strip()
+        if not raw_caption.endswith("."):
+            raw_caption += "."
+        print(f"[WARN] Still 0 — retrying with raw prompt: '{raw_caption}'")
+        with torch.no_grad():
+            outputs = gdino_model(image_tensor_dev[None], captions=[raw_caption])
+        logits = outputs["pred_logits"].cpu().sigmoid()[0]
+        boxes_cxcywh = outputs["pred_boxes"].cpu()[0]
+        filt_mask = logits.max(dim=1)[0] > 0.20
+        logits_filt = logits[filt_mask]
+        boxes_filt = boxes_cxcywh[filt_mask]
+        tokenized = tokenizer(raw_caption)
+        print(f"[i] Retry 2: {len(boxes_filt)} candidates with raw prompt")
+
+    # Build labels and convert to xyxy (AFTER retries so data is final)
     all_labels = []
     all_det_scores = []
     for logit, box in zip(logits_filt, boxes_filt):
@@ -141,7 +170,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         all_labels.append(f"{pred_phrase}({score:.2f})")
         all_det_scores.append(score)
 
-    # Convert to xyxy
     all_boxes_xyxy = torch.zeros(len(boxes_filt), 4)
     if len(boxes_filt) > 0:
         scaled = boxes_filt.clone()
@@ -153,8 +181,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         all_boxes_xyxy[:, 1] = scaled[:, 1] - scaled[:, 3] / 2
         all_boxes_xyxy[:, 2] = scaled[:, 0] + scaled[:, 2] / 2
         all_boxes_xyxy[:, 3] = scaled[:, 1] + scaled[:, 3] / 2
-
-    print(f"[OK] GroundingDINO found {len(boxes_filt)} candidates")
 
     # ---- Step 4: CLIP Verification ----
     clip_pass_mask = []

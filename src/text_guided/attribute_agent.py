@@ -16,15 +16,22 @@ ATTRIBUTE_AGENT_PROMPT = """You are an expert object matching agent. You will be
 Your task: Analyze which object(s) from the scene best match the user's query.
 Consider: color, type, position, size, and any other attributes mentioned.
 
-Return your analysis as valid JSON:
+Return your analysis as valid JSON with these fields:
+- query: the user's original query
+- matched_objects: list of matches with name, position, confidence (high/medium/low), reason
+- recommended_prompt: a short phrase describing ONLY the object type and color (e.g. "white car", "large zebra", "red truck"). Do NOT write instructions or descriptions, just the object name.
+- ambiguity: none, low, or high
+- reasoning: brief explanation
+
+Example for query "the white car on the left":
 {
-  "query": "the user's original query",
+  "query": "the white car on the left",
   "matched_objects": [
-    {"name": "object name", "position": "position", "confidence": "high/medium/low", "reason": "why this matches"}
+    {"name": "white sedan", "position": "left", "confidence": "high", "reason": "matches color and position"}
   ],
-  "recommended_prompt": "optimized detection prompt for GroundingDINO",
-  "ambiguity": "none/low/high",
-  "reasoning": "brief explanation of matching logic"
+  "recommended_prompt": "white car",
+  "ambiguity": "none",
+  "reasoning": "Only one white car visible on the left side"
 }"""
 
 
