@@ -136,28 +136,27 @@ import matplotlib.pyplot as plt
 
 step_images = results.get("step_images", {})
 step_names = [
-    ("step1_scene", "Step 1: Scene Agent (LLaVA)"),
-    ("step2_query", "Step 2: Attribute Agent (LLaVA)"),
-    ("step3_candidates", "Step 3: Candidates (GroundingDINO)"),
+    ("step1_scene", "Step 1: Scene Understanding Agent (LLaVA)"),
+    ("step2_query", "Step 2: Attribute Matching Agent (LLaVA)"),
+    ("step3_candidates", "Step 3: Candidate Detection (GroundingDINO)"),
     ("step4_clip", "Step 4: CLIP Verification"),
     ("step5_spatial", "Step 5: Spatial Selection"),
     ("step6_final", "Step 6: Final Segmentation (SAM)"),
 ]
 
-fig, axes = plt.subplots(2, 3, figsize=(24, 12))
-for idx, (key, title) in enumerate(step_names):
-    ax = axes[idx // 3][idx % 3]
+!mkdir -p outputs/text_guided
+
+for key, title in step_names:
     img = step_images.get(key)
     if img is not None:
-        ax.imshow(img)
-    ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.axis('off')
-
-fig.suptitle(f'Text-Guided Detection: "{USER_PROMPT}"', fontsize=18, fontweight='bold')
-plt.tight_layout()
-!mkdir -p outputs
-plt.savefig("outputs/text_guided_pipeline.jpg", dpi=150, bbox_inches='tight')
-plt.show()
+        plt.figure(figsize=(14, 8))
+        plt.imshow(img)
+        plt.title(title, fontsize=16, fontweight='bold')
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(f"outputs/text_guided/{key}.jpg", dpi=150, bbox_inches='tight')
+        plt.show()
+        print(f"[OK] Saved: outputs/text_guided/{key}.jpg\n")
 
 # Print summary log
 print("\n" + results.get("summary", ""))
