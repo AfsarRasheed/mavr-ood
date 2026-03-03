@@ -738,7 +738,7 @@ def build_app():
                             with gr.TabItem("Step-by-Step Pipeline"):
                                 with gr.Row():
                                     tg_step1 = gr.Image(label="Step 1: Scene Understanding", height=250)
-                                    tg_step2 = gr.Image(label="Step 2: Query Parsing", height=250)
+                                    tg_step2 = gr.Image(label="Step 2: Attribute Matching Agent", height=250)
                                     tg_step3 = gr.Image(label="Step 3: Candidates (GDINO)", height=250)
                                 with gr.Row():
                                     tg_step4 = gr.Image(label="Step 4: CLIP Verification", height=250)

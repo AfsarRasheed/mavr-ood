@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Text-Guided VLM Detection Module
-Allows users to provide an image + text prompt to detect, verify,
-and segment specific objects with step-by-step visualization.
+Multi-agent approach: two LLaVA agents analyze the scene and match
+the user's query before detection, verification, and segmentation.
 
 Pipeline:
-  Step 1: Scene Understanding (LLaVA) - lists all objects
-  Step 2: Query Parsing (rule-based) - extract object/attribute/spatial
+  Step 1: Scene Understanding Agent (LLaVA) - lists all objects
+  Step 2: Attribute Matching Agent (LLaVA) - reasons about which object matches the query
   Step 3: Candidate Detection (GroundingDINO) - find all matches
   Step 4: Semantic Verification (CLIP) - filter false positives
   Step 5: Spatial Filtering (rule-based) - pick correct one
@@ -103,7 +103,65 @@ def _parse_json_response(response):
 
 
 # =====================
-# Step 2: Query Parsing
+# Step 2: Attribute Matching Agent
+# =====================
+
+ATTRIBUTE_AGENT_PROMPT = """You are an expert object matching agent. You will be given:
+1. A scene analysis listing all objects in an image
+2. A user's search query describing a specific object
+
+Your task: Analyze which object(s) from the scene best match the user's query.
+Consider: color, type, position, size, and any other attributes mentioned.
+
+Return your analysis as valid JSON:
+{
+  "query": "the user's original query",
+  "matched_objects": [
+    {"name": "object name", "position": "position", "confidence": "high/medium/low", "reason": "why this matches"}
+  ],
+  "recommended_prompt": "optimized detection prompt for GroundingDINO",
+  "ambiguity": "none/low/high",
+  "reasoning": "brief explanation of matching logic"
+}"""
+
+
+def attribute_matching_agent(image_path, scene_result, user_prompt):
+    """
+    Run LLaVA to reason about which object matches the user's query.
+    
+    Args:
+        image_path: path to image file
+        scene_result: dict from scene_understanding()
+        user_prompt: original user query
+        
+    Returns:
+        dict with matching analysis
+    """
+    from src.agents.vlm_backend import run_vlm
+    
+    # Build context from scene analysis
+    scene_text = json.dumps(scene_result, indent=2) if isinstance(scene_result, dict) else str(scene_result)
+    
+    messages = [
+        {"role": "system", "content": ATTRIBUTE_AGENT_PROMPT},
+        {"role": "user", "content": f"Scene Analysis:\n{scene_text}\n\nUser Query: \"{user_prompt}\"\n\nWhich object(s) match this query? Return valid JSON only."}
+    ]
+    
+    print("[i] Text-Guided: Running attribute matching agent (LLaVA)...")
+    output = run_vlm(messages, image_path=image_path)
+    print(f"[OK] Attribute matching complete")
+    
+    result = _parse_json_response(output)
+    
+    # Use the agent's recommended prompt if available
+    if isinstance(result, dict) and result.get("recommended_prompt"):
+        print(f"[i] Agent recommended prompt: '{result['recommended_prompt']}'")
+    
+    return result
+
+
+# =====================
+# Query Parsing (internal helper)
 # =====================
 
 SPATIAL_TERMS = {
@@ -314,22 +372,34 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2, cv2.LINE_AA)
     steps["step1_scene"] = step1
     
-    # ---- Step 2: Query Parsing ----
+    # ---- Step 2: Attribute Matching Agent ----
     step2 = image_np.copy()
     overlay2 = step2.copy()
-    cv2.rectangle(overlay2, (10, 10), (min(400, W - 10), 160), (0, 0, 0), -1)
+    cv2.rectangle(overlay2, (10, 10), (min(500, W - 10), 220), (0, 0, 0), -1)
     step2 = cv2.addWeighted(overlay2, 0.7, step2, 0.3, 0)
     
-    query_info = [
-        f"User Query: \"{parsed_query['original']}\"",
-        f"Object: \"{parsed_query['object_prompt']}\"",
+    agent2_info = [
+        f"Query: \"{parsed_query['original']}\"",
+        f"Detection Prompt: \"{parsed_query['object_prompt']}\"",
         f"Attribute: {parsed_query.get('attribute', 'None')}",
         f"Spatial: {parsed_query.get('spatial', 'None (detect all)')}",
     ]
-    for i, text in enumerate(query_info):
-        cv2.putText(step2, text, (20, 40 + i * 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 200), 1, cv2.LINE_AA)
-    cv2.putText(step2, "STEP 2: Query Parsing", (10, H - 15),
+    # Add attribute agent reasoning if available
+    attr_result = parsed_query.get('attr_agent_result', {})
+    if isinstance(attr_result, dict):
+        reasoning = attr_result.get('reasoning', '')
+        ambiguity = attr_result.get('ambiguity', 'N/A')
+        if reasoning:
+            agent2_info.append(f"Reasoning: {reasoning[:80]}")
+        agent2_info.append(f"Ambiguity: {ambiguity}")
+        matched = attr_result.get('matched_objects', [])
+        for m in matched[:3]:
+            agent2_info.append(f"  Match: {m.get('name','')} ({m.get('position','')}) [{m.get('confidence','')}]")
+    
+    for i, text in enumerate(agent2_info):
+        cv2.putText(step2, text, (20, 35 + i * 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 200), 1, cv2.LINE_AA)
+    cv2.putText(step2, "STEP 2: Attribute Matching Agent (LLaVA)", (10, H - 15),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2, cv2.LINE_AA)
     steps["step2_query"] = step2
     
@@ -481,11 +551,22 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     print(f"Prompt: \"{user_prompt}\"")
     print(f"{'='*60}")
     
-    # ---- Step 1: Scene Understanding ----
+    # ---- Step 1: Scene Understanding Agent ----
     scene_result = scene_understanding(image_path)
     
-    # ---- Step 2: Query Parsing ----
+    # ---- Step 2: Attribute Matching Agent ----
+    attr_result = attribute_matching_agent(image_path, scene_result, user_prompt)
+    
+    # Parse query (internal helper)
     parsed = parse_query(user_prompt)
+    parsed['attr_agent_result'] = attr_result
+    
+    # If agent recommended a better prompt, use it
+    if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
+        agent_prompt = attr_result['recommended_prompt'].strip()
+        if agent_prompt and len(agent_prompt) > 2:
+            print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
+            parsed['object_prompt'] = agent_prompt
     
     # ---- Step 3: Candidate Detection (GroundingDINO) ----
     print(f"[i] Running GroundingDINO with prompt: '{parsed['object_prompt']}'")
@@ -667,12 +748,13 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         n_selected = 0
     
     summary_lines = [
-        f"TEXT-GUIDED DETECTION RESULTS",
+        f"TEXT-GUIDED DETECTION RESULTS (Multi-Agent)",
         f"{'='*40}",
         f"Query: \"{user_prompt}\"",
-        f"Parsed: object='{parsed['object_prompt']}', spatial={parsed.get('spatial', 'None')}",
+        f"Detection Prompt: '{parsed['object_prompt']}'",
+        f"Spatial: {parsed.get('spatial', 'None')}",
         f"",
-        f"STEP 1 - Scene Understanding:",
+        f"STEP 1 - Scene Understanding Agent (LLaVA):",
     ]
     
     if isinstance(scene_result, dict):
@@ -682,6 +764,15 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         summary_lines.append(f"  Objects found: {len(objects)}")
         for obj in objects[:8]:
             summary_lines.append(f"    - {obj.get('name', '?')} ({obj.get('position', '?')}, {obj.get('color', '?')})")
+    
+    # Attribute Agent summary
+    summary_lines.append(f"")
+    summary_lines.append(f"STEP 2 - Attribute Matching Agent (LLaVA):")
+    if isinstance(attr_result, dict):
+        summary_lines.append(f"  Reasoning: {attr_result.get('reasoning', 'N/A')}")
+        summary_lines.append(f"  Ambiguity: {attr_result.get('ambiguity', 'N/A')}")
+        for m in attr_result.get('matched_objects', [])[:3]:
+            summary_lines.append(f"  Match: {m.get('name','')} at {m.get('position','')} [{m.get('confidence','')}]")
     
     summary_lines.extend([
         f"",
