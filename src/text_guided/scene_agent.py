@@ -15,7 +15,9 @@ For each object, provide:
 3. Color/appearance
 4. Size relative to scene (small, medium, large)
 
-Return your analysis as valid JSON:
+You MUST return ONLY valid JSON with NO other text before or after it.
+Do NOT include any explanation, markdown, or commentary. ONLY the JSON object.
+
 {
   "scene_type": "description of the scene",
   "lighting": "bright/dim/dark/night",
@@ -43,7 +45,7 @@ def scene_understanding(image_path):
 
     messages = [
         {"role": "system", "content": SCENE_SYSTEM_PROMPT},
-        {"role": "user", "content": "Analyze this image and list all visible objects with their positions and attributes. Return valid JSON only."}
+        {"role": "user", "content": "Analyze this image and list all visible objects with their positions and attributes. Return ONLY valid JSON, nothing else."}
     ]
 
     print("[i] Text-Guided: Running scene understanding (LLaVA)...")
@@ -55,8 +57,22 @@ def scene_understanding(image_path):
 
 def parse_json_response(response):
     """Robustly parse JSON from LLaVA output."""
-    # Clean LaTeX-style underscores
+    if not response or not response.strip():
+        return {"scene_type": "unknown", "objects": [], "raw_output": "(empty response)"}
+
+    # Clean up common LLaVA issues
     response = response.replace("\\_", "_")
+    response = response.replace("\\n", "\n")
+    response = response.strip()
+
+    # Remove markdown code fences if wrapping the entire response
+    if response.startswith("```json"):
+        response = response[7:]
+    elif response.startswith("```"):
+        response = response[3:]
+    if response.endswith("```"):
+        response = response[:-3]
+    response = response.strip()
 
     # Try direct parse
     try:
@@ -64,7 +80,14 @@ def parse_json_response(response):
     except json.JSONDecodeError:
         pass
 
-    # Try extracting JSON block
+    # Fix trailing commas (common LLaVA error)
+    cleaned = re.sub(r',\s*([}\]])', r'\1', response)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting JSON block from mixed text
     patterns = [
         r'```json\s*(.*?)\s*```',
         r'```\s*(.*?)\s*```',
@@ -73,10 +96,14 @@ def parse_json_response(response):
     for pattern in patterns:
         match = re.search(pattern, response, re.DOTALL)
         if match:
+            candidate = match.group(1) if '```' in pattern else match.group(0)
+            # Fix trailing commas in extracted block too
+            candidate = re.sub(r',\s*([}\]])', r'\1', candidate)
             try:
-                return json.loads(match.group(1) if '```' in pattern else match.group(0))
+                return json.loads(candidate)
             except (json.JSONDecodeError, IndexError):
                 continue
 
-    # Fallback
-    return {"scene_type": "unknown", "objects": [], "raw_output": response}
+    # Fallback — store raw output for debugging
+    print(f"[WARN] Could not parse LLaVA JSON, using fallback")
+    return {"scene_type": "unknown", "objects": [], "raw_output": response[:500]}

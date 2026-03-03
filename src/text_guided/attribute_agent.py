@@ -54,7 +54,7 @@ def attribute_matching_agent(image_path, scene_result, user_prompt):
 
     messages = [
         {"role": "system", "content": ATTRIBUTE_AGENT_PROMPT},
-        {"role": "user", "content": f"Scene Analysis:\n{scene_text}\n\nUser Query: \"{user_prompt}\"\n\nWhich object(s) match this query? Return valid JSON only."}
+        {"role": "user", "content": f"Scene Analysis:\n{scene_text}\n\nUser Query: \"{user_prompt}\"\n\nWhich object(s) match this query? Return ONLY valid JSON, no other text."}
     ]
 
     print("[i] Text-Guided: Running attribute matching agent (LLaVA)...")
