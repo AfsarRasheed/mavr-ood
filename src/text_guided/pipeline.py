@@ -4,6 +4,8 @@ Runs all 6 steps: Scene Agent → Attribute Agent → GroundingDINO → CLIP →
 """
 
 import gc
+import os
+import json
 import numpy as np
 import torch
 
@@ -317,6 +319,33 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     summary = "\n".join(summary_lines)
     print(f"\n{summary}")
+
+    # ---- Save Results to JSON (like OOD agents) ----
+    output_dir = os.path.join("outputs", "text_guided")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate filename from image
+    img_basename = os.path.splitext(os.path.basename(image_path))[0] if image_path else "unknown"
+
+    with open(os.path.join(output_dir, f"{img_basename}_scene_agent.json"), "w") as f:
+        json.dump(scene_result if isinstance(scene_result, dict) else {"raw": str(scene_result)}, f, indent=2)
+    print(f"[OK] Saved: {output_dir}/{img_basename}_scene_agent.json")
+
+    with open(os.path.join(output_dir, f"{img_basename}_attribute_agent.json"), "w") as f:
+        json.dump(attr_result if isinstance(attr_result, dict) else {"raw": str(attr_result)}, f, indent=2)
+    print(f"[OK] Saved: {output_dir}/{img_basename}_attribute_agent.json")
+
+    with open(os.path.join(output_dir, f"{img_basename}_summary.json"), "w") as f:
+        json.dump({
+            "query": user_prompt,
+            "detection_prompt": parsed['object_prompt'],
+            "spatial": parsed.get('spatial'),
+            "candidates_found": n_detected,
+            "clip_verified": n_verified,
+            "selected": n_selected,
+            "summary": summary,
+        }, f, indent=2)
+    print(f"[OK] Saved: {output_dir}/{img_basename}_summary.json")
 
     return {
         "step_images": step_images,
