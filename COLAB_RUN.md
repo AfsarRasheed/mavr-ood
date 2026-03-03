@@ -144,6 +144,126 @@ for r in sorted(glob.glob("outputs/test_single_results/*_clip_heatmap.jpg")):
 
 ---
 
+## Phase 2C: Text-Guided Detection (Run directly in Colab)
+
+### Cell 4C -- Setup Test Image
+```python
+# Use any image -- here we use the existing zebra image
+import os
+TEST_IMAGE = "./data/challenging_subset/original/animals03_Zebras_in_the_road.jpg"
+USER_PROMPT = "the zebra"  # Change this to any prompt
+
+# Or upload your own image:
+# from google.colab import files
+# uploaded = files.upload()
+# TEST_IMAGE = list(uploaded.keys())[0]
+
+print(f"[OK] Image: {TEST_IMAGE}")
+print(f"[OK] Prompt: {USER_PROMPT}")
+```
+
+### Cell 5C -- Run Text-Guided Detection Pipeline
+```python
+import sys
+import numpy as np
+import torch
+from PIL import Image
+
+# Add paths
+sys.path.insert(0, "GroundingDINO")
+
+# Load models (same as OOD pipeline)
+from app import load_gdino_model, load_sam_predictor, load_clip_verifier
+
+gdino = load_gdino_model()
+sam = load_sam_predictor()
+clip_v = load_clip_verifier()
+
+# Load image
+image_pil = Image.open(TEST_IMAGE).convert("RGB")
+image_np = np.array(image_pil)
+
+# Run text-guided pipeline
+from text_guided_detector import run_text_guided_pipeline
+
+results = run_text_guided_pipeline(
+    image_np=image_np,
+    user_prompt=USER_PROMPT,
+    image_path=TEST_IMAGE,
+    gdino_model=gdino,
+    sam_predictor=sam,
+    clip_verifier=clip_v,
+    box_threshold=0.25,
+    clip_threshold=0.20,
+)
+
+print("\n[OK] Text-guided detection complete!")
+```
+
+### Cell 6C -- View Step-by-Step Results
+```python
+from IPython.display import display, Image as IPImage
+import matplotlib.pyplot as plt
+
+step_images = results.get("step_images", {})
+step_names = [
+    ("step1_scene", "Step 1: Scene Understanding (LLaVA)"),
+    ("step2_query", "Step 2: Query Parsing"),
+    ("step3_candidates", "Step 3: Candidates (GroundingDINO)"),
+    ("step4_clip", "Step 4: CLIP Verification"),
+    ("step5_spatial", "Step 5: Spatial Selection"),
+    ("step6_final", "Step 6: Final Segmentation (SAM)"),
+]
+
+fig, axes = plt.subplots(2, 3, figsize=(24, 12))
+for idx, (key, title) in enumerate(step_names):
+    ax = axes[idx // 3][idx % 3]
+    img = step_images.get(key)
+    if img is not None:
+        ax.imshow(img)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.axis('off')
+
+fig.suptitle(f'Text-Guided Detection: "{USER_PROMPT}"', fontsize=18, fontweight='bold')
+plt.tight_layout()
+plt.savefig("outputs/text_guided_pipeline.jpg", dpi=150, bbox_inches='tight')
+plt.show()
+
+# Print summary log
+print("\n" + results.get("summary", ""))
+```
+
+### Cell 7C -- Try Different Prompts (Optional)
+```python
+# Try more complex queries on the same image or different images
+test_cases = [
+    ("./data/challenging_subset/original/animals03_Zebras_in_the_road.jpg", "the largest zebra"),
+    ("./data/challenging_subset/original/animals01_Horse_in_the_road.jpg", "the horse"),
+]
+
+for img_path, prompt in test_cases:
+    image_np = np.array(Image.open(img_path).convert("RGB"))
+    results = run_text_guided_pipeline(
+        image_np=image_np,
+        user_prompt=prompt,
+        image_path=img_path,
+        gdino_model=gdino,
+        sam_predictor=sam,
+        clip_verifier=clip_v,
+    )
+    # Show final result
+    final = results["step_images"].get("step6_final")
+    if final is not None:
+        plt.figure(figsize=(10, 6))
+        plt.imshow(final)
+        plt.title(f'"{prompt}"', fontsize=14)
+        plt.axis('off')
+        plt.show()
+    print(f'[OK] "{prompt}" -- done\n')
+```
+
+---
+
 ## Phase 2B: Full Dataset Run (13 images, ~60 min)
 
 ### Cell 4B — Run All Agents on Full Dataset (~45 min)
