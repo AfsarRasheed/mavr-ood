@@ -17,7 +17,7 @@ from src.text_guided.visualizer import generate_step_visualizations
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
                               gdino_model, sam_predictor, clip_verifier,
-                              box_threshold=0.3, clip_threshold=0.20,
+                              box_threshold=0.35, clip_threshold=0.20,
                               precomputed_scene=None, precomputed_attr=None):
     """
     Run the complete text-guided detection pipeline.
@@ -243,14 +243,16 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             seg_boxes_xyxy[:, 2] = scaled[:, 0] + scaled[:, 2] / 2
             seg_boxes_xyxy[:, 3] = scaled[:, 1] + scaled[:, 3] / 2
 
+            # Move boxes to SAM's device
+            sam_device = sam_predictor.model.device
             transformed_boxes = sam_predictor.transform.apply_boxes_torch(
-                seg_boxes_xyxy.to(device), (H, W)
+                seg_boxes_xyxy.to(sam_device), (H, W)
             )
 
             final_masks, _, _ = sam_predictor.predict_torch(
                 point_coords=None,
                 point_labels=None,
-                boxes=transformed_boxes,
+                boxes=transformed_boxes.to(sam_device),
                 multimask_output=False,
             )
             final_masks = final_masks.cpu()
