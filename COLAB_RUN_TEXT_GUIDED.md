@@ -85,7 +85,8 @@ image_np = np.array(image_pil)
 gc.collect()
 torch.cuda.empty_cache()
 
-from text_guided_detector import scene_understanding, attribute_matching_agent
+from src.text_guided.scene_agent import scene_understanding
+from src.text_guided.attribute_agent import attribute_matching_agent
 
 print(">> Phase 1: Running LLaVA agents...")
 scene_result = scene_understanding(TEST_IMAGE)
@@ -106,7 +107,7 @@ print("[OK] LLaVA freed from GPU")
 # ---- Phase 2: Load detection models and run pipeline ----
 print("\n>> Phase 2: Running detection pipeline...")
 from src.model_loader import load_gdino_model, load_sam_predictor, load_clip_verifier
-from text_guided_detector import run_text_guided_pipeline
+from src.text_guided import run_text_guided_pipeline
 
 gdino = load_gdino_model()
 sam = load_sam_predictor()

@@ -455,7 +455,7 @@ def process_text_guided(image, user_prompt, clip_threshold, box_threshold, progr
     if not user_prompt or not user_prompt.strip():
         return None, None, None, None, None, None, "Please enter a text prompt."
 
-    from text_guided_detector import run_text_guided_pipeline
+    from src.text_guided import run_text_guided_pipeline
     import tempfile
 
     progress(0.1, desc="Saving image...")
