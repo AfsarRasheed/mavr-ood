@@ -3,9 +3,10 @@
 MAVR-OOD Gradio Frontend
 Multi-Agent Visual Reasoning for Out-of-Distribution Object Detection
 
-Two tabs:
-  1. Single Image — upload one image, run full pipeline, see results
+Three tabs:
+  1. Single Image — upload one image, run full OOD pipeline, see results
   2. Batch Dataset — run pipeline on entire dataset folder
+  3. Text-Guided Detection — user provides text prompt to detect specific objects
 """
 
 import os
@@ -516,6 +517,57 @@ def format_analysis(agent_results, prompt_v1, prompt_v2, num_detections):
 
 
 # =====================
+# Text-Guided Pipeline
+# =====================
+
+def process_text_guided(image, user_prompt, clip_threshold, box_threshold, progress=gr.Progress()):
+    """Process a text-guided detection request."""
+    if image is None:
+        return None, None, None, None, None, None, "Please upload an image first."
+    if not user_prompt or not user_prompt.strip():
+        return None, None, None, None, None, None, "Please enter a text prompt."
+
+    from text_guided_detector import run_text_guided_pipeline
+    import tempfile
+
+    progress(0.1, desc="Saving image...")
+    # Save image to temp file for LLaVA
+    temp_path = os.path.join(tempfile.gettempdir(), "tg_input.jpg")
+    Image.fromarray(image).save(temp_path)
+
+    progress(0.2, desc="Loading models...")
+    gdino = load_gdino_model()
+    sam = load_sam_predictor()
+    clip_v = load_clip_verifier()
+    clip_v.similarity_threshold = clip_threshold
+
+    progress(0.3, desc="Running text-guided pipeline...")
+    results = run_text_guided_pipeline(
+        image_np=image,
+        user_prompt=user_prompt,
+        image_path=temp_path,
+        gdino_model=gdino,
+        sam_predictor=sam,
+        clip_verifier=clip_v,
+        box_threshold=box_threshold,
+        clip_threshold=clip_threshold,
+    )
+
+    progress(1.0, desc="Done!")
+
+    steps = results.get("step_images", {})
+    return (
+        steps.get("step1_scene"),
+        steps.get("step2_query"),
+        steps.get("step3_candidates"),
+        steps.get("step4_clip"),
+        steps.get("step5_spatial"),
+        steps.get("step6_final"),
+        results.get("summary", "No results"),
+    )
+
+
+# =====================
 # Batch Pipeline
 # =====================
 def process_batch(dataset_dir, clip_threshold, box_threshold, progress=gr.Progress()):
@@ -745,6 +797,66 @@ def build_app():
                     fn=process_batch,
                     inputs=[dataset_path, batch_clip_thresh, batch_box_thresh],
                     outputs=[batch_gallery, batch_summary],
+                )
+
+            # ==================
+            # Tab 3: Text-Guided Detection
+            # ==================
+            with gr.TabItem("[i] Text-Guided Detection", id="textguided"):
+                gr.Markdown("""Upload any image and describe the object to find. 
+                Supports complex queries like **\"the grey car on the left\"** or **\"the largest dog\"**.""")
+
+                with gr.Row():
+                    # Left column: Input
+                    with gr.Column(scale=1):
+                        tg_image = gr.Image(
+                            label="Upload Image",
+                            type="numpy",
+                            height=300,
+                        )
+                        tg_prompt = gr.Textbox(
+                            label="Text Prompt",
+                            placeholder='e.g., "the white car on the right"',
+                            info="Describe the object. Include spatial terms (left/right/largest) to select one.",
+                        )
+                        tg_run_btn = gr.Button(
+                            "[>>] Detect Object", variant="primary", size="lg"
+                        )
+
+                        with gr.Accordion("[*] Advanced Settings", open=False):
+                            tg_clip_thresh = gr.Slider(
+                                0.05, 0.5, value=0.20, step=0.05,
+                                label="CLIP Threshold",
+                            )
+                            tg_box_thresh = gr.Slider(
+                                0.1, 0.5, value=0.25, step=0.05,
+                                label="Box Threshold",
+                            )
+
+                    # Right column: Step-by-step results
+                    with gr.Column(scale=3):
+                        with gr.Tabs():
+                            with gr.TabItem("Step-by-Step Pipeline"):
+                                with gr.Row():
+                                    tg_step1 = gr.Image(label="Step 1: Scene Understanding", height=250)
+                                    tg_step2 = gr.Image(label="Step 2: Query Parsing", height=250)
+                                    tg_step3 = gr.Image(label="Step 3: Candidates (GDINO)", height=250)
+                                with gr.Row():
+                                    tg_step4 = gr.Image(label="Step 4: CLIP Verification", height=250)
+                                    tg_step5 = gr.Image(label="Step 5: Spatial Filter", height=250)
+                                    tg_step6 = gr.Image(label="Step 6: Final Result (SAM)", height=250)
+
+                            with gr.TabItem("Detection Log"):
+                                tg_log = gr.Textbox(
+                                    label="Pipeline Log",
+                                    lines=25,
+                                    max_lines=30,
+                                )
+
+                tg_run_btn.click(
+                    fn=process_text_guided,
+                    inputs=[tg_image, tg_prompt, tg_clip_thresh, tg_box_thresh],
+                    outputs=[tg_step1, tg_step2, tg_step3, tg_step4, tg_step5, tg_step6, tg_log],
                 )
 
         gr.Markdown("""
