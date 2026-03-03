@@ -86,12 +86,17 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     parsed = parse_query(user_prompt)
     parsed['attr_agent_result'] = attr_result
 
-    # If agent recommended a better prompt, use it
+    # If agent recommended a better prompt, use it (but validate it)
     if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
         agent_prompt = attr_result['recommended_prompt'].strip()
-        if agent_prompt and len(agent_prompt) > 2:
+        # Reject if it looks like template text (LLaVA sometimes copies the template)
+        bad_keywords = ['groundingdino', 'optimized', 'detection prompt', 'example', 'template']
+        is_template = any(kw in agent_prompt.lower() for kw in bad_keywords)
+        if agent_prompt and len(agent_prompt) > 2 and not is_template:
             print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
             parsed['object_prompt'] = agent_prompt
+        else:
+            print(f"[i] Agent prompt rejected (template text), using parsed: '{parsed['object_prompt']}'")
 
     # ---- Step 3: Candidate Detection (GroundingDINO) ----
     print(f"[i] Running GroundingDINO with prompt: '{parsed['object_prompt']}'")
@@ -173,7 +178,9 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 clip_scores_all.append(0.0)
                 continue
 
-            similarity = clip_verifier.compute_similarity(crop, parsed['object_prompt'])
+            # Convert numpy crop to PIL for CLIP
+            crop_pil = PILImage.fromarray(crop)
+            similarity = clip_verifier.compute_similarity(crop_pil, parsed['object_prompt'])
             clip_scores_all.append(similarity)
             clip_pass_mask.append(similarity >= clip_threshold)
 
