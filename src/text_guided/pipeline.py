@@ -17,7 +17,7 @@ from src.text_guided.visualizer import generate_step_visualizations
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
                               gdino_model, sam_predictor, clip_verifier,
-                              box_threshold=0.35, clip_threshold=0.20,
+                              box_threshold=0.35, clip_threshold=0.25,
                               precomputed_scene=None, precomputed_attr=None):
     """
     Run the complete text-guided detection pipeline.

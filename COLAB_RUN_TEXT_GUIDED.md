@@ -121,7 +121,7 @@ results = run_text_guided_pipeline(
     sam_predictor=sam,
     clip_verifier=clip_v,
     box_threshold=0.35,
-    clip_threshold=0.20,
+    clip_threshold=0.25,
     precomputed_scene=scene_result,
     precomputed_attr=attr_result,
 )
