@@ -20,99 +20,28 @@ import matplotlib
 matplotlib.use('Agg')
 
 # ============================================================
-# CRITICAL: Monkey-patch transformers BEFORE importing GroundingDINO
-# transformers 5.0 changed get_extended_attention_mask(mask, shape, device)
-# to get_extended_attention_mask(mask, shape, dtype). GroundingDINO passes
-# device, causing TypeError. This makes it work with both.
+# Model loading — imported from src/model_loader.py
+# (monkey-patch, path setup, and singleton loaders all live there)
 # ============================================================
-import transformers
-_orig_fn = getattr(transformers.PreTrainedModel, 'get_extended_attention_mask', None)
-if _orig_fn is not None:
-    def _safe_get_extended_attention_mask(self, attention_mask, input_shape, device_or_dtype=None):
-        if attention_mask.dim() == 3:
-            extended = attention_mask[:, None, :, :]
-        elif attention_mask.dim() == 2:
-            extended = attention_mask[:, None, None, :]
-        else:
-            raise ValueError(f"Wrong attention_mask shape: {attention_mask.shape}")
-        extended = extended.to(dtype=torch.float32)
-        extended = (1.0 - extended) * torch.finfo(torch.float32).min
-        return extended
-    transformers.PreTrainedModel.get_extended_attention_mask = _safe_get_extended_attention_mask
+from src.model_loader import (
+    load_gdino_model,
+    load_sam_predictor,
+    load_clip_verifier,
+    get_device,
+    DEVICE,
+)
 import matplotlib.pyplot as plt
 
-# Add paths for GroundingDINO and SAM
+# Add paths for GroundingDINO imports used in this file
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "GroundingDINO"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "segment_anything"))
 
 import GroundingDINO.groundingdino.datasets.transforms as T
-from GroundingDINO.groundingdino.models import build_model
-from GroundingDINO.groundingdino.util.slconfig import SLConfig
-from GroundingDINO.groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
-from segment_anything import sam_model_registry, SamPredictor
+from GroundingDINO.groundingdino.util.utils import get_phrases_from_posmap
+from segment_anything import SamPredictor
 
-# =====================
-# Global model holders
-# =====================
-_gdino_model = None
-_sam_predictor = None
-_clip_verifier = None
-
-# Default paths
-DEFAULT_GDINO_CONFIG = "GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-DEFAULT_GDINO_CKPT = "weights/groundingdino_swint_ogc.pth"
-DEFAULT_SAM_CKPT = "weights/sam_vit_h_4b8939.pth"
+# Default paths for dataset
 DEFAULT_DATASET_DIR = "./data/challenging_subset"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# =====================
-# Model Loading
-# =====================
-def load_gdino_model():
-    """Load GroundingDINO model (singleton)."""
-    global _gdino_model
-    if _gdino_model is not None:
-        return _gdino_model
-
-    print("[i] Loading GroundingDINO...")
-    args = SLConfig.fromfile(DEFAULT_GDINO_CONFIG)
-    args.device = DEVICE
-    args.bert_base_uncased_path = None
-    _gdino_model = build_model(args)
-    checkpoint = torch.load(DEFAULT_GDINO_CKPT, map_location="cpu", weights_only=False)
-    _gdino_model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-    _gdino_model = _gdino_model.to(DEVICE)
-    _gdino_model.eval()
-    print("[OK] GroundingDINO loaded")
-    return _gdino_model
-
-
-def load_sam_predictor():
-    """Load SAM predictor (singleton)."""
-    global _sam_predictor
-    if _sam_predictor is not None:
-        return _sam_predictor
-
-    print("[i] Loading SAM...")
-    sam = sam_model_registry["vit_h"](checkpoint=DEFAULT_SAM_CKPT)
-    sam = sam.to(DEVICE)
-    _sam_predictor = SamPredictor(sam)
-    print("[OK] SAM loaded")
-    return _sam_predictor
-
-
-def load_clip_verifier():
-    """Load CLIP verifier (singleton)."""
-    global _clip_verifier
-    if _clip_verifier is not None:
-        return _clip_verifier
-
-    print("[i] Loading CLIP...")
-    from src.clip_verifier import CLIPVerifier
-    _clip_verifier = CLIPVerifier(device=DEVICE)
-    print("[OK] CLIP loaded")
-    return _clip_verifier
 
 
 # =====================

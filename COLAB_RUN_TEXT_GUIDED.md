@@ -105,7 +105,7 @@ print("[OK] LLaVA freed from GPU")
 
 # ---- Phase 2: Load detection models and run pipeline ----
 print("\n>> Phase 2: Running detection pipeline...")
-from app import load_gdino_model, load_sam_predictor, load_clip_verifier
+from src.model_loader import load_gdino_model, load_sam_predictor, load_clip_verifier
 from text_guided_detector import run_text_guided_pipeline
 
 gdino = load_gdino_model()
