@@ -518,7 +518,8 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
                               gdino_model, sam_predictor, clip_verifier,
-                              box_threshold=0.3, clip_threshold=0.20):
+                              box_threshold=0.3, clip_threshold=0.20,
+                              precomputed_scene=None, precomputed_attr=None):
     """
     Run the complete text-guided detection pipeline.
     
@@ -552,10 +553,37 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     print(f"{'='*60}")
     
     # ---- Step 1: Scene Understanding Agent ----
-    scene_result = scene_understanding(image_path)
+    if precomputed_scene is not None:
+        scene_result = precomputed_scene
+        print("[OK] Using pre-computed scene analysis (LLaVA already ran)")
+    else:
+        scene_result = scene_understanding(image_path)
     
     # ---- Step 2: Attribute Matching Agent ----
-    attr_result = attribute_matching_agent(image_path, scene_result, user_prompt)
+    if precomputed_attr is not None:
+        attr_result = precomputed_attr
+        print("[OK] Using pre-computed attribute matching (LLaVA already ran)")
+    else:
+        attr_result = attribute_matching_agent(image_path, scene_result, user_prompt)
+    
+    # ---- FREE LLaVA from GPU to make room for detection models ----
+    import gc
+    try:
+        from src.agents.vlm_backend import _model, _processor
+        import src.agents.vlm_backend as vlm_mod
+        if hasattr(vlm_mod, '_model') and vlm_mod._model is not None:
+            del vlm_mod._model
+            vlm_mod._model = None
+        if hasattr(vlm_mod, '_processor') and vlm_mod._processor is not None:
+            del vlm_mod._processor
+            vlm_mod._processor = None
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("[OK] LLaVA freed from GPU memory")
+    except Exception as e:
+        print(f"[WARN] Could not free LLaVA: {e}")
+        gc.collect()
+        torch.cuda.empty_cache()
     
     # Parse query (internal helper)
     parsed = parse_query(user_prompt)

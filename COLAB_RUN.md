@@ -163,29 +163,51 @@ print(f"[OK] Prompt: {USER_PROMPT}")
 ```
 
 ### Cell 5C -- Run Text-Guided Detection Pipeline
+> Memory-managed: LLaVA agents run first, then freed, then detection models load.
 ```python
-import sys
+import sys, gc
 import numpy as np
 import torch
 from PIL import Image
 
-# Add paths
 sys.path.insert(0, "GroundingDINO")
-
-# Load models (same as OOD pipeline)
-from app import load_gdino_model, load_sam_predictor, load_clip_verifier
-
-gdino = load_gdino_model()
-sam = load_sam_predictor()
-clip_v = load_clip_verifier()
 
 # Load image
 image_pil = Image.open(TEST_IMAGE).convert("RGB")
 image_np = np.array(image_pil)
 
-# Run text-guided pipeline
+# --- Phase 1: Run LLaVA agents FIRST (before detection models) ---
+gc.collect()
+torch.cuda.empty_cache()
+
+from text_guided_detector import scene_understanding, attribute_matching_agent, parse_query
+
+print(">> Phase 1: Running LLaVA agents...")
+scene_result = scene_understanding(TEST_IMAGE)
+attr_result = attribute_matching_agent(TEST_IMAGE, scene_result, USER_PROMPT)
+
+# Free LLaVA from GPU
+import src.agents.vlm_backend as vlm_mod
+if hasattr(vlm_mod, '_model') and vlm_mod._model is not None:
+    del vlm_mod._model
+    vlm_mod._model = None
+if hasattr(vlm_mod, '_processor') and vlm_mod._processor is not None:
+    del vlm_mod._processor
+    vlm_mod._processor = None
+gc.collect()
+torch.cuda.empty_cache()
+print("[OK] LLaVA freed from GPU")
+
+# --- Phase 2: Load detection models and run pipeline ---
+print("\n>> Phase 2: Running detection pipeline...")
+from app import load_gdino_model, load_sam_predictor, load_clip_verifier
 from text_guided_detector import run_text_guided_pipeline
 
+gdino = load_gdino_model()
+sam = load_sam_predictor()
+clip_v = load_clip_verifier()
+
+# Run pipeline (LLaVA steps already done, will reuse cached results)
 results = run_text_guided_pipeline(
     image_np=image_np,
     user_prompt=USER_PROMPT,
@@ -195,6 +217,9 @@ results = run_text_guided_pipeline(
     clip_verifier=clip_v,
     box_threshold=0.25,
     clip_threshold=0.20,
+    # Pass pre-computed agent results to skip re-loading LLaVA
+    precomputed_scene=scene_result,
+    precomputed_attr=attr_result,
 )
 
 print("\n[OK] Text-guided detection complete!")
