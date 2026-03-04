@@ -29,23 +29,30 @@ from PIL import Image
 import streamlit as st
 
 # ============================================================
-# Imports — use model_loader (no Gradio dependency)
+# Lazy imports — models loaded only when needed (not at startup)
+# This lets the UI render even without GPU/models installed
 # ============================================================
-from src.model_loader import (
-    load_gdino_model,
-    load_sam_predictor,
-    load_clip_verifier,
-)
-from app import (
-    preprocess_image,
-    get_grounding_output,
-    run_sam_segmentation,
-    create_detection_visualization,
-    create_mask_visualization,
-    create_binary_mask_visualization,
-    run_agents_on_image,
-    extract_prompts,
-)
+def _load_backend():
+    """Lazy-load backend functions from app.py and model_loader."""
+    from src.model_loader import load_gdino_model, load_sam_predictor, load_clip_verifier
+    from app import (
+        preprocess_image, get_grounding_output, run_sam_segmentation,
+        create_detection_visualization, create_mask_visualization,
+        create_binary_mask_visualization, run_agents_on_image, extract_prompts,
+    )
+    return {
+        "load_gdino_model": load_gdino_model,
+        "load_sam_predictor": load_sam_predictor,
+        "load_clip_verifier": load_clip_verifier,
+        "preprocess_image": preprocess_image,
+        "get_grounding_output": get_grounding_output,
+        "run_sam_segmentation": run_sam_segmentation,
+        "create_detection_visualization": create_detection_visualization,
+        "create_mask_visualization": create_mask_visualization,
+        "create_binary_mask_visualization": create_binary_mask_visualization,
+        "run_agents_on_image": run_agents_on_image,
+        "extract_prompts": extract_prompts,
+    }
 
 
 # =====================
@@ -249,9 +256,10 @@ with tab1:
                 status2 = st.status("Phase 2: Running detection pipeline...", expanded=True)
                 with status2:
                     st.write("🔄 Loading detection models...")
-                    gdino = load_gdino_model()
-                    sam = load_sam_predictor()
-                    clip_v = load_clip_verifier()
+                    backend = _load_backend()
+                    gdino = backend["load_gdino_model"]()
+                    sam = backend["load_sam_predictor"]()
+                    clip_v = backend["load_clip_verifier"]()
 
                     st.write(f"🔍 Running pipeline: '{user_prompt}'...")
                     results = run_text_guided_pipeline(
@@ -348,10 +356,11 @@ with tab2:
 
             with status:
                 st.write("🔄 Running 5 LLaVA agents...")
-                agent_results = run_agents_on_image(tmp_path)
+                backend = _load_backend()
+                agent_results = backend["run_agents_on_image"](tmp_path)
                 st.write("✅ All 5 agents completed")
 
-                prompt_v1, prompt_v2 = extract_prompts(agent_results)
+                prompt_v1, prompt_v2 = backend["extract_prompts"](agent_results)
                 st.write(f"Prompt V1: **{prompt_v1}**")
                 st.write(f"Prompt V2: **{prompt_v2}**")
 
@@ -377,21 +386,21 @@ with tab2:
 
             with status2:
                 st.write("🔄 Loading detection models...")
-                gdino = load_gdino_model()
-                predictor = load_sam_predictor()
-                clip_verifier = load_clip_verifier()
+                gdino = backend["load_gdino_model"]()
+                predictor = backend["load_sam_predictor"]()
+                clip_verifier = backend["load_clip_verifier"]()
 
                 st.write(f"🔍 Detecting with prompt: '{prompt_v1}'...")
-                image_tensor = preprocess_image(ood_image_pil)
+                image_tensor = backend["preprocess_image"](ood_image_pil)
 
-                boxes, labels, scores = get_grounding_output(
+                boxes, labels, scores = backend["get_grounding_output"](
                     gdino, image_tensor, prompt_v1,
                     box_threshold=box_threshold, text_threshold=0.25
                 )
 
                 if len(boxes) == 0 and prompt_v2 != prompt_v1:
                     st.write(f"🔄 Trying prompt V2: '{prompt_v2}'...")
-                    boxes, labels, scores = get_grounding_output(
+                    boxes, labels, scores = backend["get_grounding_output"](
                         gdino, image_tensor, prompt_v2,
                         box_threshold=box_threshold, text_threshold=0.25
                     )
@@ -427,7 +436,7 @@ with tab2:
                 boxes_xyxy = None
                 if len(boxes) > 0:
                     st.write("🔄 Running SAM segmentation...")
-                    masks, boxes_xyxy = run_sam_segmentation(predictor, ood_image_np, boxes)
+                    masks, boxes_xyxy = backend["run_sam_segmentation"](predictor, ood_image_np, boxes)
                     st.write(f"✅ Found {len(boxes)} detections")
                 else:
                     st.write("⚠️ No detections found")
@@ -449,9 +458,9 @@ with tab2:
 
             # Visualizations
             if masks is not None and len(masks) > 0:
-                det_img = create_detection_visualization(ood_image_np, boxes_xyxy, labels)
-                mask_img = create_mask_visualization(ood_image_np, masks)
-                binary_img = create_binary_mask_visualization(ood_image_np, masks)
+                det_img = backend["create_detection_visualization"](ood_image_np, boxes_xyxy, labels)
+                mask_img = backend["create_mask_visualization"](ood_image_np, masks)
+                binary_img = backend["create_binary_mask_visualization"](ood_image_np, masks)
 
                 c1, c2, c3 = st.columns(3)
                 with c1:
