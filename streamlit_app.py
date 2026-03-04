@@ -309,10 +309,59 @@ with tab1:
                         if img is not None:
                             st.image(img, caption=title, use_container_width=True)
 
-                # Detection Log
+                # Pipeline Summary
                 st.divider()
-                with st.expander("📋 Detection Log", expanded=False):
-                    st.text(results.get("summary", "No results"))
+                with st.expander("📋 Pipeline Summary", expanded=True):
+                    # Build clean summary from results
+                    summary_parts = []
+
+                    # Query info
+                    summary_parts.append(f"**Query:** \"{user_prompt}\"")
+
+                    # Step 1: Scene
+                    scene = results.get("scene_result", {})
+                    if isinstance(scene, dict) and scene.get("scene_type"):
+                        n_objs = len(scene.get("objects", []))
+                        summary_parts.append(
+                            f"**Step 1 — Scene Understanding:** {scene.get('scene_type', 'N/A')} scene, "
+                            f"{scene.get('lighting', 'N/A')} lighting, {n_objs} objects identified"
+                        )
+                    else:
+                        summary_parts.append("**Step 1 — Scene Understanding:** Scene analyzed")
+
+                    # Step 2: Attribute
+                    attr = results.get("attr_result", {})
+                    if isinstance(attr, dict) and attr.get("reasoning"):
+                        summary_parts.append(
+                            f"**Step 2 — Attribute Matching:** {attr.get('reasoning', 'N/A')} "
+                            f"(Ambiguity: {attr.get('ambiguity', 'N/A')})"
+                        )
+                    else:
+                        summary_parts.append("**Step 2 — Attribute Matching:** Prompt refined")
+
+                    # Step 3-4: Detection + CLIP
+                    n_det = results.get("n_detected", 0)
+                    n_ver = results.get("n_verified", 0)
+                    summary_parts.append(f"**Step 3 — GroundingDINO:** {n_det} candidate(s) detected")
+                    summary_parts.append(f"**Step 4 — CLIP Verification:** {n_ver}/{n_det} passed semantic check")
+
+                    # Step 5: Spatial
+                    spatial = results.get("parsed", {}).get("spatial", None)
+                    n_sel = results.get("n_selected", 0)
+                    anchor = results.get("parsed", {}).get("anchor", None)
+                    if spatial and anchor:
+                        summary_parts.append(f"**Step 5 — Spatial Filter:** Selected object '{spatial}' the '{anchor}' → {n_sel} selected")
+                    elif spatial:
+                        summary_parts.append(f"**Step 5 — Spatial Filter:** '{spatial}' → {n_sel} selected")
+                    else:
+                        summary_parts.append(f"**Step 5 — Spatial Filter:** No filter (keeping all {n_sel})")
+
+                    # Step 6: SAM
+                    summary_parts.append(f"**Step 6 — SAM Segmentation:** ✅ Complete")
+
+                    # Render
+                    for part in summary_parts:
+                        st.markdown(part)
 
 
 # =====================
