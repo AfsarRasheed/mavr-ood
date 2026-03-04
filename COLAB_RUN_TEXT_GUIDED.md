@@ -212,12 +212,54 @@ for img_path, prompt in test_cases:
 
 ---
 
-## Phase 4: Launch Gradio UI (Optional)
+## Phase 4: Launch Streamlit UI
 
-### Cell 8 -- Run Gradio App
+### Cell 8 -- Run Streamlit App
+> Full interactive UI with both Text-Guided and OOD Detection tabs.
+
+**Option A: Using ngrok (recommended, faster)**
 ```python
-import app
-demo = app.build_app()
-demo.launch(share=True)
+# Install
+!pip install pyngrok -q
+!pip install git+https://github.com/openai/CLIP.git -q
+
+# Set your ngrok auth token (free signup at https://dashboard.ngrok.com/get-started/your-authtoken)
+!ngrok authtoken YOUR_TOKEN_HERE  # << paste your token
+
+# Kill any old processes
+!pkill -f streamlit 2>/dev/null
+
+# Start Streamlit
+!nohup streamlit run streamlit_app.py --server.port 8501 --server.headless true &
+
+# Create tunnel
+import time; time.sleep(8)
+from pyngrok import ngrok
+ngrok.kill()
+url = ngrok.connect(8501)
+print(f"\n🔗 Open this URL in your browser:\n{url}\n")
 ```
-Then open the shared link and use the **Text-Guided Detection** tab (Tab 1).
+
+**Option B: Using localtunnel (no signup needed)**
+```python
+# Install
+!pip install git+https://github.com/openai/CLIP.git -q
+!npm install -g localtunnel
+
+# Kill any old processes
+!pkill -f streamlit 2>/dev/null
+
+# Start Streamlit
+!nohup streamlit run streamlit_app.py --server.port 8501 --server.headless true &
+
+# Create tunnel
+import time; time.sleep(8)
+!lt --port 8501
+```
+> When localtunnel asks for a password, run this to get it:
+> ```python
+> import urllib.request
+> print(urllib.request.urlopen('https://ipv4.icanhazip.com').read().decode('utf8').strip())
+> ```
+
+Then open the URL and use the **Text-Guided Detection** or **OOD Detection** tab.
