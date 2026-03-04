@@ -71,7 +71,8 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
         agent2_info.append(f"Ambiguity: {ambiguity}")
         matched = attr_result.get('matched_objects', [])
         for m in matched[:3]:
-            agent2_info.append(f"  Match: {m.get('name','')} ({m.get('position','')}) [{m.get('confidence','')}]")
+            conf = m.get('confidence', 'N/A') or 'N/A'
+            agent2_info.append(f"  Match: {m.get('name','')} ({m.get('position','')}) [{conf}]")
 
     for i, text in enumerate(agent2_info):
         cv2.putText(step2, text, (20, 35 + i * 22),
