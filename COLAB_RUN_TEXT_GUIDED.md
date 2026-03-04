@@ -264,3 +264,116 @@ import time; time.sleep(8)
 > ```
 
 Then open the URL and use the **Text-Guided Detection** or **OOD Detection** tab.
+
+---
+
+## Phase 5: Evaluate on Dataset
+
+### Cell 9 -- Run Evaluation (13 Images)
+> Runs the VLM pipeline on all 13 test images and computes IoU/F1 metrics against ground truth masks.
+
+```python
+!python run_evaluate_vlm.py
+```
+
+### Cell 10 -- View Results
+```python
+from IPython.display import display, Image as IPImage
+import glob, json, os
+
+# Show comparison images
+for img_path in sorted(glob.glob("outputs/vlm_evaluation/*_comparison.jpg")):
+    print(f"\n{os.path.basename(img_path)}")
+    display(IPImage(img_path, width=800))
+
+# Show summary chart
+if os.path.exists("outputs/vlm_evaluation/evaluation_summary.jpg"):
+    display(IPImage("outputs/vlm_evaluation/evaluation_summary.jpg", width=800))
+
+# Print metrics
+with open("outputs/vlm_evaluation/evaluation_results.json") as f:
+    results = json.load(f)
+print(f"\n📊 Average IoU: {results['summary']['avg_iou']:.4f}")
+print(f"📊 Average F1:  {results['summary']['avg_f1']:.4f}")
+print(f"📊 Success Rate: {results['summary']['n_success']}/{results['summary']['n_images']}")
+```
+
+---
+
+## Phase 6: Evaluate on Custom Images (Optional)
+
+> Use your own images with manually annotated masks.
+
+### Step 1: Create Masks
+- Use [makesense.ai](https://www.makesense.ai/) or MS Paint
+- Paint the **target object white**, everything else **black**
+- Save as `.png` with the same name as your image
+
+### Cell 11 -- Upload Custom Images + Masks
+```python
+import os
+os.makedirs("data/custom_eval/original", exist_ok=True)
+os.makedirs("data/custom_eval/labels", exist_ok=True)
+
+from google.colab import files
+
+print("📷 Upload IMAGES (jpg/png):")
+uploaded_imgs = files.upload()
+for name in uploaded_imgs:
+    with open(f"data/custom_eval/original/{name}", "wb") as f:
+        f.write(uploaded_imgs[name])
+    print(f"  ✅ {name}")
+
+print("\n🏷️ Upload MASK PNGs (same names, .png extension):")
+uploaded_masks = files.upload()
+for name in uploaded_masks:
+    with open(f"data/custom_eval/labels/{name}", "wb") as f:
+        f.write(uploaded_masks[name])
+    print(f"  ✅ {name}")
+```
+
+### Cell 12 -- Add Queries and Run
+```python
+# ---- Add your queries here ----
+queries = {
+    "highway_scene.jpg": "the white car on the right",
+    # "city_road.jpg": "the red truck",
+    # "parking.jpg": "the person next to the blue car",
+}
+
+# Patch query map
+with open("run_evaluate_vlm.py", "r") as f:
+    code = f.read()
+new_entries = "\n".join([f'    "{k}": "{v}",' for k, v in queries.items()])
+code = code.replace(
+    '"animals26_Unnamed_Road_Kazakhstan.jpg": "the cow",\n}',
+    f'"animals26_Unnamed_Road_Kazakhstan.jpg": "the cow",\n{new_entries}\n}}'
+)
+with open("run_evaluate_vlm.py", "w") as f:
+    f.write(code)
+
+print("✅ Queries added!")
+for k, v in queries.items():
+    print(f"  {k} → \"{v}\"")
+
+# Run evaluation
+!python run_evaluate_vlm.py --data-dir ./data/custom_eval
+```
+
+### Cell 13 -- View Custom Results
+```python
+from IPython.display import display, Image as IPImage
+import glob, json, os
+
+for img_path in sorted(glob.glob("outputs/vlm_evaluation/*_comparison.jpg")):
+    print(f"\n{os.path.basename(img_path)}")
+    display(IPImage(img_path, width=800))
+
+if os.path.exists("outputs/vlm_evaluation/evaluation_summary.jpg"):
+    display(IPImage("outputs/vlm_evaluation/evaluation_summary.jpg", width=800))
+
+with open("outputs/vlm_evaluation/evaluation_results.json") as f:
+    results = json.load(f)
+print(f"\n📊 Average IoU: {results['summary']['avg_iou']:.4f}")
+print(f"📊 Average F1:  {results['summary']['avg_f1']:.4f}")
+```
