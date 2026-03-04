@@ -467,13 +467,7 @@ Output: Segmentation mask of the grey car next to the red truck
 mavr-ood/
 ├── src/
 │   ├── agents/
-│   │   ├── agent1.py              # Scene Context Analyzer (OOD mode)
-│   │   ├── agent2.py              # Spatial Anomaly Detector (OOD mode)
-│   │   ├── agent3.py              # Semantic Inconsistency Analyzer (OOD mode)
-│   │   ├── agent4.py              # Visual Appearance Evaluator (OOD mode)
-│   │   ├── agent5.py              # Reasoning Synthesizer (OOD mode)
-│   │   ├── run_all_agents.py      # Sequential agent runner
-│   │   └── vlm_backend.py         # LLaVA-7B inference backend
+│   │   └── vlm_backend.py         # LLaVA-7B inference backend (shared)
 │   ├── text_guided/
 │   │   ├── __init__.py            # Package init (exports run_text_guided_pipeline)
 │   │   ├── scene_agent.py         # Agent 1: Scene Understanding
@@ -486,16 +480,17 @@ mavr-ood/
 ├── GroundingDINO/                 # GroundingDINO (object detection)
 ├── segment_anything/              # SAM (segmentation)
 ├── data/
-│   └── challenging_subset/        # 13 test images and labels
+│   └── challenging_subset/        # 13 test images with ground truth
 │       ├── original/              # Input images (road scenes)
-│       └── labels/                # Ground truth masks
+│       └── labels/                # Ground truth binary masks (.png)
 ├── weights/                       # Model checkpoints
 │   ├── groundingdino_swint_ogc.pth
 │   └── sam_vit_h_4b8939.pth
 ├── outputs/
-│   └── text_guided/               # Pipeline output JSONs + visualizations
-├── streamlit_app.py               # Streamlit web frontend (2 tabs)
-├── app.py                         # Gradio web frontend (legacy)
+│   ├── text_guided/               # Pipeline output JSONs + visualizations
+│   └── vlm_evaluation/            # Evaluation results + comparison images
+├── streamlit_app.py               # Streamlit web frontend
+├── run_evaluate_vlm.py            # Evaluation script (IoU, F1, Precision, Recall)
 ├── COLAB_RUN_TEXT_GUIDED.md       # Colab execution guide
 ├── MAVR_PROJECT_DOCUMENTATION.md  # This documentation
 └── requirements.txt               # Python dependencies
@@ -572,7 +567,74 @@ Peak VRAM: ~7.0 GB of 14.5 GB available
 
 ---
 
-## 8. Spatial Reasoning System
+## 8. Evaluation Methodology
+
+### 8.1 Evaluation Script (`run_evaluate_vlm.py`)
+
+**Purpose**: End-to-end evaluation that runs the full VLM pipeline on test images and computes segmentation metrics against ground truth masks.
+
+**Pipeline Flow**:
+1. Load all models (GroundingDINO, SAM, CLIP)
+2. For each image in the dataset:
+   - Map image to a predefined text query (e.g., `animals03_Zebras_in_the_road.jpg` → `"the zebra"`)
+   - Run the full 6-step VLM pipeline with the query
+   - Extract predicted SAM segmentation mask
+   - Load ground truth binary mask from `labels/` directory
+   - Compute pixel-level metrics: IoU, F1, Precision, Recall
+   - Save side-by-side comparison visualization (Original → Ground Truth → Predicted)
+3. Compute aggregate metrics and generate summary charts
+
+**Usage**:
+```bash
+# Evaluate on dataset (13 images)
+python run_evaluate_vlm.py
+
+# Evaluate on custom images
+python run_evaluate_vlm.py --data-dir ./data/custom_eval
+```
+
+### 8.2 Evaluation Metrics
+
+| Metric | What It Measures | Range | Better |
+|--------|-----------------|-------|--------|
+| **IoU** | Overlap between predicted mask and ground truth | 0–1 | Higher |
+| **F1** | Harmonic mean of precision and recall | 0–1 | Higher |
+| **Precision** | Fraction of predicted pixels that are correct | 0–1 | Higher |
+| **Recall** | Fraction of ground truth pixels that are detected | 0–1 | Higher |
+| **Localization Success** | IoU > 0.1 (object was found) | % | Higher |
+
+### 8.3 Query Mapping
+
+Each test image is mapped to a natural language query:
+
+| Image | Query |
+|-------|-------|
+| `animals03_Zebras_in_the_road.jpg` | "the zebra" |
+| `animals05_cows_near_Phonsavan_Laos.jpg` | "the cow" |
+| `animals06_sheep_roads_lambs.jpg` | "the sheep" |
+| `animals15_Doebeln_Pferdebahn.jpg` | "the horse" |
+| `animals23_rhino_crossing_road.jpg` | "the rhino" |
+| `animals25_jablonna_dziki.jpg` | "the wild boar" |
+| ... | ... |
+
+### 8.4 Custom Image Evaluation
+
+To evaluate on your own images:
+1. **Annotate**: Use [makesense.ai](https://www.makesense.ai/) or MS Paint to create binary masks (white = target, black = background)
+2. **Organize**: Place images in `data/custom_eval/original/` and masks in `data/custom_eval/labels/`
+3. **Add queries**: Update `QUERY_MAP` in `run_evaluate_vlm.py` with your image-query pairs
+4. **Run**: `python run_evaluate_vlm.py --data-dir ./data/custom_eval`
+
+### 8.5 Outputs
+
+All results saved to `outputs/vlm_evaluation/`:
+- `evaluation_results.json` — per-image and aggregate metrics
+- `*_comparison.jpg` — side-by-side visualization per image (Original | Ground Truth | Predicted)
+- `evaluation_summary.jpg` — bar chart (IoU/F1 per image) + pie chart (success rate)
+
+---
+
+## 9. Spatial Reasoning System
 
 ### 8.1 Absolute Spatial Terms
 
@@ -619,7 +681,7 @@ Query: "the grey car next to the red truck"
 
 ---
 
-## 9. Key Design Decisions
+## 10. Key Design Decisions
 
 ### 9.1 Why Multi-Agent Instead of Single-Model?
 - **Specialization**: Scene Understanding focuses on "what's in the scene," Attribute Matching focuses on "which object matches the query"
@@ -652,7 +714,7 @@ Query: "the grey car next to the red truck"
 
 ---
 
-## 10. Limitations and Future Work
+## 11. Limitations and Future Work
 
 ### Current Limitations:
 1. **Processing speed**: ~15-25 seconds per image (LLaVA agents + detection pipeline)
