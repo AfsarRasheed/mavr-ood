@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MAVR-OOD Streamlit Frontend
-Multi-Agent Vision-Language Reasoning for OOD Object Localization
+MAVR Streamlit Frontend
+Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments
 
 Two tabs:
   1. Text-Guided Detection — user provides text prompt to detect specific objects
@@ -111,8 +111,8 @@ st.markdown("""
 # =====================
 st.markdown("""
 <div class="main-header">
-    <h1>🔍 MAVR-OOD</h1>
-    <p>Multi-Agent Vision-Language Reasoning for Reliable Out-of-Distribution Object Localization</p>
+    <h1>🔍 MAVR</h1>
+    <p>Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments</p>
     <p class="pipeline">
         Pipeline: LLaVA-7B → GroundingDINO → CLIP Verification → SAM Segmentation
     </p>
@@ -538,7 +538,7 @@ with tab2:
 # =====================
 st.markdown("""
 <div class="footer">
-    <strong>MAVR-OOD</strong> | LLaVA-7B · GroundingDINO · CLIP · SAM<br>
-    Multi-Agent Vision-Language Reasoning for Reliable Out-of-Distribution Object Localization
+    <strong>MAVR</strong> | LLaVA-7B · GroundingDINO · CLIP · SAM<br>
+    Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments
 </div>
 """, unsafe_allow_html=True)
