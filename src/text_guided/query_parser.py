@@ -4,6 +4,7 @@ Parses user text prompts into structured components and filters
 bounding boxes by spatial terms.
 """
 
+import math
 import numpy as np
 import torch
 
@@ -30,6 +31,14 @@ SPATIAL_TERMS = {
     "behind": "behind",
     "near": "near",
 }
+
+# Relational phrases that require an anchor (reference) object
+RELATIONAL_PHRASES = [
+    "next to the", "beside the", "near the", "close to the",
+    "next to a", "beside a", "near a", "close to a",
+    "behind the", "in front of the", "above the", "below the",
+    "behind a", "in front of a", "above a", "below a",
+]
 
 COLOR_TERMS = [
     "red", "blue", "green", "yellow", "white", "black", "grey", "gray",
@@ -82,6 +91,41 @@ def parse_query(user_prompt):
         if object_desc.endswith(prep):
             object_desc = object_desc[:-len(prep)].strip()
 
+    # Extract relational anchor object (e.g. "the car next to the truck" → anchor="truck")
+    anchor = None
+    anchor_phrase = None
+    for rel_phrase in RELATIONAL_PHRASES:
+        if rel_phrase in prompt:
+            # Everything after the relational phrase is the anchor object
+            anchor_part = prompt.split(rel_phrase, 1)[1].strip()
+            # Clean up anchor
+            for prep in [" on", " at", " in", " to"]:
+                if anchor_part.endswith(prep):
+                    anchor_part = anchor_part[:-len(prep)].strip()
+            if anchor_part:
+                anchor = anchor_part
+                anchor_phrase = rel_phrase + anchor_part
+                # Set spatial to relational type
+                if "next to" in rel_phrase or "beside" in rel_phrase or "near" in rel_phrase or "close to" in rel_phrase:
+                    spatial = "next_to"
+                elif "behind" in rel_phrase:
+                    spatial = "behind"
+                elif "in front of" in rel_phrase:
+                    spatial = "in_front"
+                elif "above" in rel_phrase:
+                    spatial = "above"
+                elif "below" in rel_phrase:
+                    spatial = "below"
+                break
+
+    # Remove anchor phrase from object description
+    if anchor_phrase:
+        object_desc = prompt.replace(anchor_phrase, "").strip()
+        # Clean trailing prepositions
+        for prep in [" on", " at", " in", " to", " from"]:
+            if object_desc.endswith(prep):
+                object_desc = object_desc[:-len(prep)].strip()
+
     # Extract color/attribute
     attribute = None
     for color in COLOR_TERMS:
@@ -103,20 +147,23 @@ def parse_query(user_prompt):
         "attribute": attribute,
         "spatial": spatial,
         "detect_all": detect_all,
+        "anchor": anchor,  # NEW: reference object for relational queries
     }
 
-    print(f"[i] Query parsed: object='{gdino_prompt}', attribute={attribute}, spatial={spatial}, detect_all={detect_all}")
+    anchor_info = f", anchor='{anchor}'" if anchor else ""
+    print(f"[i] Query parsed: object='{gdino_prompt}', attribute={attribute}, spatial={spatial}{anchor_info}, detect_all={detect_all}")
     return result
 
 
-def spatial_filter(boxes_xyxy, spatial_term, image_shape=None):
+def spatial_filter(boxes_xyxy, spatial_term, image_shape=None, anchor_boxes=None):
     """
     Filter bounding boxes by spatial term.
 
     Args:
         boxes_xyxy: tensor (N, 4) in [x1, y1, x2, y2] format
-        spatial_term: one of 'left', 'right', 'center', 'largest', etc.
+        spatial_term: one of 'left', 'right', 'center', 'largest', 'next_to', etc.
         image_shape: (H, W) tuple for reference
+        anchor_boxes: tensor (M, 4) of anchor/reference object boxes (for relational queries)
 
     Returns:
         index of the selected box
@@ -132,6 +179,50 @@ def spatial_filter(boxes_xyxy, spatial_term, image_shape=None):
     y_centers = (boxes[:, 1] + boxes[:, 3]) / 2
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
 
+    # --- Relational spatial terms (require anchor) ---
+    if spatial_term in ("next_to", "behind", "in_front", "above", "below") and anchor_boxes is not None:
+        anchor = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
+        if len(anchor) > 0:
+            # Use the center of the first (best) anchor box
+            anchor_cx = (anchor[0, 0] + anchor[0, 2]) / 2
+            anchor_cy = (anchor[0, 1] + anchor[0, 3]) / 2
+
+            if spatial_term == "next_to":
+                # Pick the target closest to the anchor (Euclidean distance)
+                distances = np.sqrt((x_centers - anchor_cx)**2 + (y_centers - anchor_cy)**2)
+                return int(np.argmin(distances))
+            elif spatial_term == "behind":
+                # "Behind" in road scenes = further up in image (smaller y)
+                above_mask = y_centers < anchor_cy
+                if above_mask.any():
+                    candidates = np.where(above_mask)[0]
+                    dists = np.sqrt((x_centers[candidates] - anchor_cx)**2 + (y_centers[candidates] - anchor_cy)**2)
+                    return int(candidates[np.argmin(dists)])
+            elif spatial_term == "in_front":
+                # "In front" = closer to camera (larger y)
+                below_mask = y_centers > anchor_cy
+                if below_mask.any():
+                    candidates = np.where(below_mask)[0]
+                    dists = np.sqrt((x_centers[candidates] - anchor_cx)**2 + (y_centers[candidates] - anchor_cy)**2)
+                    return int(candidates[np.argmin(dists)])
+            elif spatial_term == "above":
+                above_mask = y_centers < anchor_cy
+                if above_mask.any():
+                    candidates = np.where(above_mask)[0]
+                    dists = np.abs(x_centers[candidates] - anchor_cx)
+                    return int(candidates[np.argmin(dists)])
+            elif spatial_term == "below":
+                below_mask = y_centers > anchor_cy
+                if below_mask.any():
+                    candidates = np.where(below_mask)[0]
+                    dists = np.abs(x_centers[candidates] - anchor_cx)
+                    return int(candidates[np.argmin(dists)])
+
+            # Fallback for relational: pick closest
+            distances = np.sqrt((x_centers - anchor_cx)**2 + (y_centers - anchor_cy)**2)
+            return int(np.argmin(distances))
+
+    # --- Absolute spatial terms (existing logic, unchanged) ---
     if spatial_term == "left":
         return int(np.argmin(x_centers))
     elif spatial_term == "right":

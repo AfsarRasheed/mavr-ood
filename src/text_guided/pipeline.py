@@ -229,10 +229,40 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     # ---- Step 5: Spatial Filtering ----
     selected_idx = None
+    anchor_boxes = None
+
+    # Detect anchor (reference) object if relational query
+    if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below'):
+        print(f"[i] Detecting anchor object: '{parsed['anchor']}'...")
+        try:
+            anchor_caption = parsed['anchor'].lower().strip()
+            if not anchor_caption.endswith("."):
+                anchor_caption += "."
+            with torch.no_grad():
+                anchor_outputs = gdino_model(image_tensor_dev[None], captions=[anchor_caption])
+            anchor_logits = anchor_outputs["pred_logits"].cpu().sigmoid()[0]
+            anchor_boxes_raw = anchor_outputs["pred_boxes"].cpu()[0]
+            anchor_filt = anchor_logits.max(dim=1)[0] > 0.25
+            anchor_boxes_cxcywh = anchor_boxes_raw[anchor_filt]
+
+            if len(anchor_boxes_cxcywh) > 0:
+                # Convert cxcywh to xyxy
+                anchor_xyxy = torch.zeros_like(anchor_boxes_cxcywh)
+                anchor_xyxy[:, 0] = (anchor_boxes_cxcywh[:, 0] - anchor_boxes_cxcywh[:, 2] / 2) * W
+                anchor_xyxy[:, 1] = (anchor_boxes_cxcywh[:, 1] - anchor_boxes_cxcywh[:, 3] / 2) * H
+                anchor_xyxy[:, 2] = (anchor_boxes_cxcywh[:, 0] + anchor_boxes_cxcywh[:, 2] / 2) * W
+                anchor_xyxy[:, 3] = (anchor_boxes_cxcywh[:, 1] + anchor_boxes_cxcywh[:, 3] / 2) * H
+                anchor_boxes = anchor_xyxy
+                print(f"[OK] Found {len(anchor_boxes)} anchor object(s): '{parsed['anchor']}'")
+            else:
+                print(f"[WARN] Anchor object '{parsed['anchor']}' not found, falling back to closest")
+        except Exception as e:
+            print(f"[WARN] Anchor detection failed: {e}")
+
     if len(passed_indices) > 0:
         if parsed['spatial'] and not parsed['detect_all']:
             passed_boxes = all_boxes_xyxy[passed_indices]
-            local_idx = spatial_filter(passed_boxes, parsed['spatial'], image_shape=(H, W))
+            local_idx = spatial_filter(passed_boxes, parsed['spatial'], image_shape=(H, W), anchor_boxes=anchor_boxes)
             if local_idx is not None:
                 selected_idx = passed_indices[local_idx]
                 print(f"[OK] Spatial filter '{parsed['spatial']}' selected candidate #{selected_idx+1}")
