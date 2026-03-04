@@ -39,6 +39,7 @@ def _load_backend():
         preprocess_image, get_grounding_output, run_sam_segmentation,
         create_detection_visualization, create_mask_visualization,
         create_binary_mask_visualization, run_agents_on_image, extract_prompts,
+        generate_pipeline_visualization_img,
     )
     return {
         "load_gdino_model": load_gdino_model,
@@ -52,6 +53,7 @@ def _load_backend():
         "create_binary_mask_visualization": create_binary_mask_visualization,
         "run_agents_on_image": run_agents_on_image,
         "extract_prompts": extract_prompts,
+        "generate_pipeline_visualization_img": generate_pipeline_visualization_img,
     }
 
 
@@ -458,6 +460,23 @@ with tab2:
 
             # Visualizations
             if masks is not None and len(masks) > 0:
+                # Pipeline visualization (3-panel: Reasoning + Boxes + Masks)
+                anomaly_reasoning = agent_results.get("agent5", {}).get("reasoning", "N/A")
+                clip_scores_list = []
+                try:
+                    clip_scores_list = [0.0] * len(boxes_xyxy)
+                except Exception:
+                    pass
+
+                pipeline_img = backend["generate_pipeline_visualization_img"](
+                    ood_image_np, anomaly_reasoning, prompt_v1, prompt_v2,
+                    boxes_xyxy, clip_scores_list, masks
+                )
+                st.image(pipeline_img, caption="Pipeline Visualization", use_container_width=True)
+
+                st.divider()
+
+                # Individual visualizations
                 det_img = backend["create_detection_visualization"](ood_image_np, boxes_xyxy, labels)
                 mask_img = backend["create_mask_visualization"](ood_image_np, masks)
                 binary_img = backend["create_binary_mask_visualization"](ood_image_np, masks)
