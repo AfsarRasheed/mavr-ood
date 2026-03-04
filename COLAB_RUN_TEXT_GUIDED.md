@@ -27,6 +27,7 @@
 !pip install -q gradio>=4.0.0 addict yapf bitsandbytes>=0.41.0
 !pip install -q -e segment_anything/
 !cd GroundingDINO && pip install -q -e . && cd ..
+!pip install git+https://github.com/openai/CLIP.git -q
 
 import torch, bitsandbytes
 print(f"[OK] torch {torch.__version__}, CUDA: {torch.cuda.is_available()}")
