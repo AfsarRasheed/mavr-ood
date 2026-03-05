@@ -302,78 +302,80 @@ print(f"📊 Success Rate: {results['summary']['n_success']}/{results['summary']
 
 ## Phase 6: Evaluate on Custom Images (Optional)
 
-> Use your own images with manually annotated masks.
+> Use your own images with manually annotated masks to evaluate the Text-Guided Pipeline.
 
 ### Step 1: Create Masks
 - Use [makesense.ai](https://www.makesense.ai/) or MS Paint
 - Paint the **target object white**, everything else **black**
-- Save as `.png` with the same name as your image
+- Save as `.png`
 
-### Cell 11 -- Upload Custom Images + Masks
+### Cell 11 — Upload Image & Mask + Set Query
 ```python
-import os
-os.makedirs("data/custom_eval/original", exist_ok=True)
-os.makedirs("data/custom_eval/labels", exist_ok=True)
-
 from google.colab import files
+import shutil, os
 
-print("📷 Upload IMAGES (jpg/png):")
-uploaded_imgs = files.upload()
-for name in uploaded_imgs:
-    with open(f"data/custom_eval/original/{name}", "wb") as f:
-        f.write(uploaded_imgs[name])
-    print(f"  ✅ {name}")
+# === Upload your image ===
+print("Upload your IMAGE file:")
+uploaded_img = files.upload()
+img_name = list(uploaded_img.keys())[0]
+img_path = f"/content/mavr-ood/{img_name}"
+shutil.move(img_name, img_path)
+print(f"Image saved: {img_path}")
 
-print("\n🏷️ Upload MASK PNGs (same names, .png extension):")
-uploaded_masks = files.upload()
-for name in uploaded_masks:
-    with open(f"data/custom_eval/labels/{name}", "wb") as f:
-        f.write(uploaded_masks[name])
-    print(f"  ✅ {name}")
+# === Upload your ground truth mask ===
+print("\nUpload your MASK file (binary/grayscale PNG where object = white):")
+uploaded_mask = files.upload()
+mask_name = list(uploaded_mask.keys())[0]
+mask_path = f"/content/mavr-ood/{mask_name}"
+shutil.move(mask_name, mask_path)
+print(f"Mask saved: {mask_path}")
+
+# === Set your query ===
+QUERY = "the red car on the left"  # <-- CHANGE THIS to your query
+print(f"\nQuery: '{QUERY}'")
+print("Edit QUERY above if needed, then run the next cell.")
 ```
 
-### Cell 12 -- Add Queries and Run
+### Cell 12 — Run Evaluation
 ```python
-# ---- Add your queries here ----
-queries = {
-    "highway_scene.jpg": "the white car on the right",
-    # "city_road.jpg": "the red truck",
-    # "parking.jpg": "the person next to the blue car",
-}
+%cd /content/mavr-ood
 
-# Patch query map
-with open("run_evaluate_vlm.py", "r") as f:
-    code = f.read()
-new_entries = "\n".join([f'    "{k}": "{v}",' for k, v in queries.items()])
-code = code.replace(
-    '"animals26_Unnamed_Road_Kazakhstan.jpg": "the cow",\n}',
-    f'"animals26_Unnamed_Road_Kazakhstan.jpg": "the cow",\n{new_entries}\n}}'
-)
-with open("run_evaluate_vlm.py", "w") as f:
-    f.write(code)
-
-print("✅ Queries added!")
-for k, v in queries.items():
-    print(f"  {k} → \"{v}\"")
-
-# Run evaluation
-!python run_evaluate_vlm.py --data-dir ./data/custom_eval
+!python evaluate_custom_image.py \
+  --image "{img_path}" \
+  --mask "{mask_path}" \
+  --query "{QUERY}" \
+  --out_dir "./outputs/custom_eval"
 ```
 
-### Cell 13 -- View Custom Results
+### Cell 13 — View Results & Step Visualizations
 ```python
 from IPython.display import display, Image as IPImage
 import glob, json, os
 
-for img_path in sorted(glob.glob("outputs/vlm_evaluation/*_comparison.jpg")):
-    print(f"\n{os.path.basename(img_path)}")
-    display(IPImage(img_path, width=800))
+img_basename = os.path.splitext(os.path.basename(img_path))[0]
 
-if os.path.exists("outputs/vlm_evaluation/evaluation_summary.jpg"):
-    display(IPImage("outputs/vlm_evaluation/evaluation_summary.jpg", width=800))
+# Show Comparison View
+eval_img = f"outputs/custom_eval/{img_basename}_eval_comparison.jpg"
+if os.path.exists(eval_img):
+    print("=== FINAL COMPARISON ===")
+    display(IPImage(eval_img, width=1200))
 
-with open("outputs/vlm_evaluation/evaluation_results.json") as f:
-    results = json.load(f)
-print(f"\n📊 Average IoU: {results['summary']['avg_iou']:.4f}")
-print(f"📊 Average F1:  {results['summary']['avg_f1']:.4f}")
+print("\n" + "="*50 + "\n")
+
+# Show Step-by-Step Pipeline Views
+steps = [
+    ("step1_scene", "Step 1: Scene Understanding"),
+    ("step2_query", "Step 2: Attribute Matching"),
+    ("step3_candidates", "Step 3: GroundingDINO Candidates"),
+    ("step4_clip", "Step 4: CLIP Verification"),
+    ("step5_spatial", "Step 5: Spatial Filter"),
+    ("step6_final", "Step 6: SAM Segmentation")
+]
+
+for step_key, title in steps:
+    step_img = f"outputs/custom_eval/{img_basename}_{step_key}.jpg"
+    if os.path.exists(step_img):
+        print(f"--- {title} ---")
+        display(IPImage(step_img, width=800))
+        print("\n")
 ```
