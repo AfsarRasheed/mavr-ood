@@ -387,3 +387,194 @@ ax.legend(handles=legend_elements, loc='lower right', fontsize=11)
 plt.tight_layout()
 plt.show()
 ```
+
+---
+
+## Cell 11 — Mask Area Comparison
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+gt_area = gt_binary.sum()
+pred_area = pred_mask.sum()
+overlap_area = int(tp)
+total_pixels = gt_binary.size
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+labels = ['Ground Truth', 'Prediction', 'Overlap']
+areas = [gt_area, pred_area, overlap_area]
+colors = ['#4CAF50', '#F44336', '#FFC107']
+bars = axes[0].bar(labels, areas, color=colors, edgecolor='white', linewidth=2)
+for bar, val in zip(bars, areas):
+    axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(areas)*0.02,
+                 f'{val:,} px', ha='center', fontsize=11, fontweight='bold')
+axes[0].set_ylabel('Pixel Count', fontsize=12)
+axes[0].set_title('Mask Area Comparison', fontsize=14, fontweight='bold')
+
+sizes = [overlap_area, gt_area - overlap_area, pred_area - overlap_area,
+         total_pixels - gt_area - pred_area + overlap_area]
+labels2 = [f'TP\n{overlap_area:,}', f'FN\n{gt_area-overlap_area:,}',
+           f'FP\n{pred_area-overlap_area:,}', f'TN']
+colors2 = ['#FFC107', '#4CAF50', '#F44336', '#E0E0E0']
+wedges, texts = axes[1].pie(sizes, labels=labels2, colors=colors2, startangle=90,
+                             textprops={'fontsize': 10, 'fontweight': 'bold'},
+                             wedgeprops={'edgecolor': 'white', 'linewidth': 2})
+axes[1].set_title('Pixel Classification Distribution', fontsize=14, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Cell 12 — Pipeline Summary Dashboard
+
+```python
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+
+fig = plt.figure(figsize=(16, 8))
+gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.3)
+
+ax1 = fig.add_subplot(gs[0, 0])
+ax1.imshow(image_np)
+ax1.set_title(f'Input Image\nQuery: "{QUERY}"', fontsize=10, fontweight='bold')
+ax1.axis('off')
+
+ax2 = fig.add_subplot(gs[0, 1])
+ax2.imshow(gt_binary, cmap='Greens')
+ax2.set_title('Ground Truth Mask', fontsize=10, fontweight='bold')
+ax2.axis('off')
+
+ax3 = fig.add_subplot(gs[0, 2])
+ax3.imshow(pred_mask, cmap='Reds')
+ax3.set_title('Predicted Mask', fontsize=10, fontweight='bold')
+ax3.axis('off')
+
+ax4 = fig.add_subplot(gs[1, 0])
+m_names = ['IoU', 'F1', 'Prec', 'Rec']
+m_vals = [iou, f1, precision, recall]
+bars = ax4.barh(m_names, m_vals, color=['#2196F3','#4CAF50','#FF9800','#9C27B0'])
+for bar, val in zip(bars, m_vals):
+    ax4.text(bar.get_width() + 0.02, bar.get_y() + bar.get_height()/2,
+             f'{val:.3f}', va='center', fontsize=11, fontweight='bold')
+ax4.set_xlim(0, 1.2)
+ax4.set_title('Metrics', fontsize=10, fontweight='bold')
+
+ax5 = fig.add_subplot(gs[1, 1])
+ax5.axis('off')
+info_lines = [
+    f"Scene: {results.get('scene_result', {}).get('scene_type', 'N/A')}",
+    f"Lighting: {results.get('scene_result', {}).get('lighting', 'N/A')}",
+    f"Candidates: {results.get('n_detected', 'N/A')}",
+    f"CLIP Verified: {results.get('n_verified', 'N/A')}",
+    f"Selected: {results.get('n_selected', 'N/A')}",
+    f"Time: {elapsed:.1f}s",
+]
+ax5.text(0.1, 0.9, "\n".join(info_lines), transform=ax5.transAxes, fontsize=11,
+         verticalalignment='top', fontfamily='monospace',
+         bbox=dict(boxstyle='round', facecolor='#E3F2FD', alpha=0.8))
+ax5.set_title('Pipeline Summary', fontsize=10, fontweight='bold')
+
+ax6 = fig.add_subplot(gs[1, 2])
+overlap = image_np.copy().astype(np.float32)
+both = (gt_binary > 0) & (pred_mask > 0)
+only_gt = (gt_binary > 0) & (pred_mask == 0)
+only_pred = (pred_mask > 0) & (gt_binary == 0)
+overlap[both] = overlap[both] * 0.3 + np.array([255, 255, 0]) * 0.7
+overlap[only_gt] = overlap[only_gt] * 0.4 + np.array([0, 255, 0]) * 0.6
+overlap[only_pred] = overlap[only_pred] * 0.4 + np.array([255, 0, 0]) * 0.6
+ax6.imshow(overlap.astype(np.uint8))
+ax6.set_title('Overlap View', fontsize=10, fontweight='bold')
+ax6.axis('off')
+
+plt.suptitle('MAVR Text-Guided Pipeline — Evaluation Dashboard',
+             fontsize=15, fontweight='bold', y=1.02)
+plt.show()
+```
+
+---
+
+## Cell 13 — Difference Map (TP / FN / FP)
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+axes[0].imshow(gt_binary, cmap='Greens', vmin=0, vmax=1)
+axes[0].set_title(f'Ground Truth\n({gt_binary.sum():,} pixels)', fontsize=12, fontweight='bold')
+axes[0].axis('off')
+
+axes[1].imshow(pred_mask, cmap='Reds', vmin=0, vmax=1)
+axes[1].set_title(f'Prediction\n({pred_mask.sum():,} pixels)', fontsize=12, fontweight='bold')
+axes[1].axis('off')
+
+diff = np.zeros((*gt_binary.shape, 3), dtype=np.uint8)
+diff[(gt_binary > 0) & (pred_mask > 0)] = [255, 255, 0]
+diff[(gt_binary > 0) & (pred_mask == 0)] = [0, 255, 0]
+diff[(gt_binary == 0) & (pred_mask > 0)] = [255, 0, 0]
+axes[2].imshow(diff)
+axes[2].set_title(f'Difference Map\nYellow=TP, Green=FN, Red=FP', fontsize=12, fontweight='bold')
+axes[2].axis('off')
+
+plt.suptitle(f'IoU: {iou:.4f}  |  F1: {f1:.4f}', fontsize=14, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Cell 14 — Metrics Table
+
+```python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.axis('off')
+
+table_data = [
+    ['IoU', f'{iou:.4f}', 'Overlap / Union of masks'],
+    ['F1 Score', f'{f1:.4f}', 'Harmonic mean of Precision & Recall'],
+    ['Precision', f'{precision:.4f}', 'Correct pixels / Total predicted pixels'],
+    ['Recall', f'{recall:.4f}', 'Correct pixels / Total GT pixels'],
+    ['True Positives', f'{int(tp):,}', 'Correctly detected pixels'],
+    ['False Positives', f'{int(fp):,}', 'Wrongly detected pixels'],
+    ['False Negatives', f'{int(fn):,}', 'Missed pixels'],
+    ['Processing Time', f'{elapsed:.1f}s', 'Total pipeline runtime'],
+]
+
+table = ax.table(
+    cellText=table_data,
+    colLabels=['Metric', 'Value', 'Description'],
+    cellLoc='center',
+    loc='center',
+    colWidths=[0.25, 0.15, 0.5]
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(11)
+table.scale(1, 1.8)
+
+for j in range(3):
+    table[0, j].set_facecolor('#1565C0')
+    table[0, j].set_text_props(color='white', fontweight='bold')
+
+for i in range(1, 5):
+    val = float(table_data[i-1][1])
+    color = '#E8F5E9' if val >= 0.5 else '#FFEBEE'
+    for j in range(3):
+        table[i, j].set_facecolor(color)
+
+for i in range(5, 9):
+    for j in range(3):
+        table[i, j].set_facecolor('#F5F5F5')
+
+plt.title(f'Evaluation Metrics — "{QUERY}"', fontsize=14, fontweight='bold', pad=20)
+plt.tight_layout()
+plt.show()
+```
