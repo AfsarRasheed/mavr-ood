@@ -22,12 +22,13 @@ MAVR addresses these challenges by employing a **multi-agent reasoning framework
 
 ### 1.3 Key Innovations
 
-1. **Multi-Agent Scene Analysis**: Two specialized LLaVA-7B agents (Scene Understanding + Attribute Matching) collaboratively analyze the image to understand context and refine detection prompts.
+1. **Multi-Agent Scene Analysis**: Three specialized LLaVA-7B agents (Scene Understanding + Attribute Matching + Reasoning) collaboratively analyze the image to understand context, refine detection prompts, and explain decisions.
 2. **Confidence-Aware Verification**: CLIP semantic verification filters false positives after GroundingDINO detection — a "second opinion" that ensures reliability.
-3. **Advanced Spatial Reasoning**: Supports both absolute spatial terms (left, right, center, largest) and relational spatial reasoning (next to, behind, near) with reference-object detection.
-4. **Reference-Object Detection**: For relational queries like "the car next to the truck," the system detects both the target and the anchor object, then uses Euclidean distance to select the correct target.
-5. **Memory-Managed Pipeline**: Phased model loading and unloading ensures the entire pipeline runs on a single T4 GPU (14.5GB VRAM) without out-of-memory errors.
-6. **Robust JSON Parsing**: Handles inconsistent LLaVA outputs through multi-layered fallback parsing — markdown fence removal, trailing comma fixes, and text extraction.
+3. **Explainable Reasoning**: A dedicated Reasoning Agent generates natural language explanations of why a particular object was selected, providing full transparency into the detection decision.
+4. **Advanced Spatial Reasoning**: Supports both absolute spatial terms (left, right, center, largest) and relational spatial reasoning (next to, behind, near) with reference-object detection.
+5. **Reference-Object Detection**: For relational queries like "the car next to the truck," the system detects both the target and the anchor object, then uses Euclidean distance to select the correct target.
+6. **Memory-Managed Pipeline**: Phased model loading and unloading ensures the entire pipeline runs on a single T4 GPU (14.5GB VRAM) without out-of-memory errors.
+7. **Robust JSON Parsing**: Handles inconsistent LLaVA outputs through multi-layered fallback parsing — markdown fence removal, trailing comma fixes, and text extraction.
 
 ---
 
@@ -90,6 +91,20 @@ Input: Image + User Query (e.g., "the grey car on the left")
 │    → Box-prompted segmentation via SAM ViT-H        │
 │                                                     │
 │  Output: Segmentation masks + step visualizations   │
+└─────────────────────┬───────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────┐
+│         PHASE 4: Explainable Reasoning              │
+│                                                     │
+│  Agent 3: Reasoning Agent (LLaVA-7B reload)         │
+│    → Receives all pipeline step results as text     │
+│    → Generates natural language reasoning paragraph │
+│    → Explains why the object was selected           │
+│    → Assesses confidence of the detection           │
+│                                                     │
+│  Memory: LLaVA freed from GPU after this phase      │
+│  Output: Explainable reasoning paragraph            │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -222,7 +237,41 @@ bad_keywords = ['groundingdino', 'optimized', 'detection prompt', 'example', 'te
 
 ---
 
-### 3.4 Query Parser (`src/text_guided/query_parser.py`)
+### 3.4 Agent 3: Reasoning Agent (`src/text_guided/reasoning_agent.py`)
+
+**Purpose**: Generates a natural language explanation of the pipeline's detection decision, providing full transparency into why a particular object was selected.
+
+**How It Works**:
+1. Called AFTER all detection steps complete (Steps 1-6)
+2. Receives all pipeline results as text input (no image needed)
+3. LLaVA-7B is reloaded in text-only mode (~4GB VRAM)
+4. Generates a cohesive reasoning paragraph explaining the detection
+5. LLaVA is freed from GPU after generation
+
+**Input Data** (assembled from pipeline results):
+- Scene type, lighting, object count (from Agent 1)
+- Attribute matching reasoning, ambiguity level (from Agent 2)
+- Number of candidates, CLIP scores per candidate (from Steps 3-4)
+- Spatial filter applied, objects selected (from Step 5)
+
+**Prompt Design**:
+```
+"A multi-agent detection pipeline processed a road scene with these results:
+ Query: '...', Scene: '...', Detection: N candidates → M passed CLIP → K selected...
+ Write a clear reasoning paragraph explaining why this object was selected
+ and how confident the decision is."
+```
+
+**Fallback Safety**: If LLaVA fails or returns a too-short response, a rule-based fallback constructs a factual reasoning paragraph from the pipeline data. The pipeline never crashes on this step.
+
+**Example Output**:
+> *"The system analyzed a night city street scene with 14 objects. The user queried 'the yellow car in the middle.' The attribute matching agent identified one yellow car near the center with no ambiguity. GroundingDINO detected 4 candidates, of which CLIP rejected 1 due to low visual similarity (0.12). The spatial filter selected the center-most candidate among the 3 verified detections. The final detection has high confidence given the clear attribute match and unambiguous spatial selection."*
+
+**Why This Agent Matters**: Provides explainable AI — users can understand WHY the system selected a particular object, not just WHAT it selected. This is critical for trust and reliability in safety-critical road environments.
+
+---
+
+### 3.5 Query Parser (`src/text_guided/query_parser.py`)
 
 **Purpose**: Rule-based parser that extracts structured query components from the user's natural language prompt.
 
@@ -275,9 +324,9 @@ selected = argmin(distances)
 
 ---
 
-### 3.5 Detection Pipeline (`src/text_guided/pipeline.py`)
+### 3.6 Detection Pipeline (`src/text_guided/pipeline.py`)
 
-**Purpose**: Main orchestrator that runs all 6 steps sequentially with memory management.
+**Purpose**: Main orchestrator that runs all 7 steps sequentially with memory management.
 
 **Pipeline Steps**:
 
@@ -290,6 +339,8 @@ selected = argmin(distances)
 | 4 | CLIP Verification | Filter false positives (threshold: 0.25) |
 | 5 | Spatial Filter | Select target based on spatial/relational term |
 | 6 | SAM Segmentation | Generate pixel-precise mask for selected object |
+| 7 | Reasoning Agent | Generate explainable reasoning paragraph (LLaVA reload) |
+| — | LLaVA Cleanup | Free LLaVA from GPU memory |
 
 **Retry Logic (Step 3)**:
 If GroundingDINO finds zero candidates:
@@ -319,7 +370,7 @@ torch.cuda.empty_cache()
 
 ---
 
-### 3.6 CLIP Semantic Verifier (`src/clip_verifier.py`)
+### 3.7 CLIP Semantic Verifier (`src/clip_verifier.py`)
 
 **Purpose**: Post-detection verification layer that filters false positive detections from GroundingDINO.
 
@@ -339,7 +390,7 @@ torch.cuda.empty_cache()
 
 ---
 
-### 3.7 GroundingDINO (Open-Vocabulary Detector)
+### 3.8 GroundingDINO (Open-Vocabulary Detector)
 
 **Purpose**: Detects objects in images based on free-form text descriptions — no fixed class vocabulary.
 
@@ -357,7 +408,7 @@ torch.cuda.empty_cache()
 
 ---
 
-### 3.8 SAM — Segment Anything Model
+### 3.9 SAM — Segment Anything Model
 
 **Purpose**: Generates pixel-precise segmentation masks from bounding box prompts.
 
@@ -371,9 +422,9 @@ torch.cuda.empty_cache()
 
 ---
 
-### 3.9 Step-by-Step Visualizer (`src/text_guided/visualizer.py`)
+### 3.10 Step-by-Step Visualizer (`src/text_guided/visualizer.py`)
 
-**Purpose**: Generates 6 annotated visualization images showing each pipeline step's contribution.
+**Purpose**: Generates 6 annotated visualization images showing each pipeline step's contribution (Steps 1-6). Step 7 reasoning is displayed in the Pipeline Summary text.
 
 **Visualizations Generated**:
 
@@ -390,14 +441,14 @@ torch.cuda.empty_cache()
 
 ---
 
-### 3.10 Streamlit Web Application (`streamlit_app.py`)
+### 3.11 Streamlit Web Application (`streamlit_app.py`)
 
 **Purpose**: Full interactive web interface with two detection modes.
 
 **Features**:
-- **Tab 1: Multi-Agent VLM Detection** — Upload image + text prompt, run full 6-step pipeline, view step-by-step visualizations and pipeline summary
+- **Tab 1: Multi-Agent VLM Detection** — Upload image + text prompt, run full 7-step pipeline, view step-by-step visualizations, pipeline summary, and explainable reasoning
 - **Tab 2: OOD Detection** — Autonomous anomaly detection using 5 LLaVA agents + 3-panel pipeline visualization
-- **Pipeline Summary**: Clean, human-readable summary of each step's results
+- **Pipeline Summary**: Clean, human-readable summary of each step's results including Step 7 reasoning paragraph
 - **Configurable Thresholds**: CLIP threshold (0.25) and Box threshold (0.35) adjustable via sidebar
 - **Lazy Loading**: Models imported only when detection is triggered — UI renders instantly
 
@@ -469,11 +520,12 @@ mavr-ood/
 │   ├── agents/
 │   │   └── vlm_backend.py         # LLaVA-7B inference backend (shared)
 │   ├── text_guided/
-│   │   ├── __init__.py            # Package init (exports run_text_guided_pipeline)
+│   │   ├── __init__.py            # Package init (exports pipeline + agents)
 │   │   ├── scene_agent.py         # Agent 1: Scene Understanding
 │   │   ├── attribute_agent.py     # Agent 2: Attribute Matching
+│   │   ├── reasoning_agent.py     # Agent 3: Explainable Reasoning
 │   │   ├── query_parser.py        # Query parsing + spatial filter + anchor detection
-│   │   ├── pipeline.py            # Main 6-step orchestrator
+│   │   ├── pipeline.py            # Main 7-step orchestrator
 │   │   └── visualizer.py          # Step-by-step visualization generator
 │   ├── clip_verifier.py           # CLIP semantic verification + heatmap
 │   └── model_loader.py            # Singleton model loader (GroundingDINO, SAM, CLIP)
