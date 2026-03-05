@@ -38,8 +38,8 @@ print(f"\nQuery: '{QUERY}'")
 ```python
 %cd /content/mavr-ood
 
-import matplotlib
-matplotlib.use('Agg')
+%matplotlib inline
+import matplotlib.pyplot as plt
 
 import os, gc, time, json, re
 import numpy as np
