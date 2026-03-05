@@ -117,10 +117,39 @@ st.markdown("""
 
 
 # =====================
-# Default Thresholds
+# Sidebar
 # =====================
 clip_threshold = 0.25
 box_threshold = 0.35
+
+with st.sidebar:
+    st.header("⚙ Settings")
+    st.markdown(f"**CLIP Threshold:** `{clip_threshold}`")
+    st.markdown(f"**Box Threshold (GroundingDINO):** `{box_threshold}`")
+
+    st.divider()
+    st.markdown("### 🤖 Pipeline Agents")
+    st.markdown("""
+    **Text-Guided Mode:**
+    - Scene Understanding Agent (LLaVA)
+    - Attribute Matching Agent (LLaVA)
+    - Object Grounding (GroundingDINO)
+    - Semantic Verification (CLIP)
+    - Spatial Filter
+    - Segmentation (SAM)
+    - Reasoning Agent (LLaVA)
+
+    **OOD Mode:**
+    - Agent 1: Scene Context
+    - Agent 2: Spatial Anomaly
+    - Agent 3: Semantic Analysis
+    - Agent 4: Visual Appearance
+    - Agent 5: Reasoning Synthesis
+    - GroundingDINO + CLIP + SAM
+    """)
+
+    st.divider()
+    st.caption("MAVR-OOD | LLaVA-7B · GroundingDINO · CLIP · SAM")
 
 
 # =====================
