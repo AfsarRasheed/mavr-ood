@@ -190,7 +190,7 @@ with tab1:
         tg_image_pil = Image.open(tg_uploaded).convert("RGB")
         tg_image_np = np.array(tg_image_pil)
 
-        st.image(tg_image_pil, caption="Uploaded Image", use_container_width=True)
+        st.image(tg_image_pil, caption="Uploaded Image", width=500)
 
         tg_run = st.button(" Detect Object", type="primary", use_container_width=True, key="tg_run")
 
