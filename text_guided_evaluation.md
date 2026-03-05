@@ -45,7 +45,6 @@ import os, gc, time, json, re
 import numpy as np
 import torch
 from PIL import Image
-import matplotlib.pyplot as plt
 
 # Monkey-patch for GroundingDINO compatibility
 import transformers
