@@ -188,7 +188,6 @@ with tab1:
         st.markdown("""
         **Example prompts:**
         - `the yellow car in the middle`
-        - `the largest zebra`
         - `the red truck on the right`
         """)
 
