@@ -1,6 +1,6 @@
 """
 Text-Guided Detection Pipeline (Main Orchestrator)
-Runs all 6 steps: Scene Agent → Attribute Agent → GroundingDINO → CLIP → Spatial → SAM
+Runs all 7 steps: Scene Agent → Attribute Agent → GroundingDINO → CLIP → Spatial → SAM → Reasoning
 """
 
 import gc
@@ -13,6 +13,7 @@ from src.text_guided.scene_agent import scene_understanding
 from src.text_guided.attribute_agent import attribute_matching_agent
 from src.text_guided.query_parser import parse_query, spatial_filter
 from src.text_guided.visualizer import generate_step_visualizations
+from src.text_guided.reasoning_agent import reasoning_agent
 
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
@@ -381,11 +382,67 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     summary = "\n".join(summary_lines)
     print(f"\n{summary}")
 
-    # ---- Save Results to JSON (like OOD agents) ----
+    # ---- Step 7: Reasoning Agent (LLaVA text-only) ----
+    # Free detection models first to make room for LLaVA
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # Build CLIP details string for reasoning context
+    clip_detail_str = ""
+    if clip_scores_all:
+        clip_parts = []
+        for i, (score, passed) in enumerate(zip(clip_scores_all, clip_pass_mask)):
+            status = "passed" if passed else "rejected"
+            clip_parts.append(f"Candidate {i+1}: similarity={score:.3f} ({status})")
+        clip_detail_str = "; ".join(clip_parts)
+
+    # Prepare reasoning input
+    scene_type = scene_result.get("scene_type", "road scene") if isinstance(scene_result, dict) else "road scene"
+    lighting = scene_result.get("lighting", "unknown") if isinstance(scene_result, dict) else "unknown"
+    n_scene_objects = len(scene_result.get("objects", [])) if isinstance(scene_result, dict) else 0
+    agent_reasoning = attr_result.get("reasoning", "") if isinstance(attr_result, dict) else ""
+    agent_ambiguity = attr_result.get("ambiguity", "unknown") if isinstance(attr_result, dict) else "unknown"
+
+    reasoning_data = {
+        "query": user_prompt,
+        "scene_type": scene_type,
+        "lighting": lighting,
+        "n_objects": n_scene_objects,
+        "reasoning": agent_reasoning,
+        "ambiguity": agent_ambiguity,
+        "recommended_prompt": parsed['object_prompt'],
+        "n_candidates": n_detected,
+        "n_verified": n_verified,
+        "n_rejected": n_detected - n_verified,
+        "clip_details": clip_detail_str,
+        "spatial_term": parsed.get('spatial', 'none'),
+        "n_selected": n_selected,
+    }
+
+    reasoning_text = reasoning_agent(reasoning_data)
+    print(f"\nSTEP 7 - Reasoning Agent:")
+    print(f"  {reasoning_text[:200]}..." if len(reasoning_text) > 200 else f"  {reasoning_text}")
+
+    # Free LLaVA again after reasoning
+    try:
+        import src.agents.vlm_backend as vlm_mod
+        if hasattr(vlm_mod, '_model') and vlm_mod._model is not None:
+            del vlm_mod._model
+            vlm_mod._model = None
+        if hasattr(vlm_mod, '_processor') and vlm_mod._processor is not None:
+            del vlm_mod._processor
+            vlm_mod._processor = None
+        gc.collect()
+        torch.cuda.empty_cache()
+        print("[OK] LLaVA freed from GPU memory (after reasoning)")
+    except Exception:
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    # ---- Save Results to JSON ----
     output_dir = os.path.join("outputs", "text_guided")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Generate filename from image
     img_basename = os.path.splitext(os.path.basename(image_path))[0] if image_path else "unknown"
 
     with open(os.path.join(output_dir, f"{img_basename}_scene_agent.json"), "w") as f:
@@ -396,6 +453,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         json.dump(attr_result if isinstance(attr_result, dict) else {"raw": str(attr_result)}, f, indent=2)
     print(f"[OK] Saved: {output_dir}/{img_basename}_attribute_agent.json")
 
+    with open(os.path.join(output_dir, f"{img_basename}_reasoning.json"), "w") as f:
+        json.dump({"reasoning": reasoning_text}, f, indent=2)
+    print(f"[OK] Saved: {output_dir}/{img_basename}_reasoning.json")
+
     with open(os.path.join(output_dir, f"{img_basename}_summary.json"), "w") as f:
         json.dump({
             "query": user_prompt,
@@ -405,6 +466,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             "clip_verified": n_verified,
             "selected": n_selected,
             "summary": summary,
+            "reasoning": reasoning_text,
         }, f, indent=2)
     print(f"[OK] Saved: {output_dir}/{img_basename}_summary.json")
 
@@ -420,4 +482,5 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "final_masks": final_masks,
         "selected_idx": selected_idx,
         "summary": summary,
+        "reasoning": reasoning_text,
     }

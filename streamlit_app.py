@@ -345,6 +345,13 @@ with tab1:
                     # Step 6: SAM
                     summary_parts.append(f"**Step 6 — SAM Segmentation:**  Complete")
 
+                    # Step 7: Reasoning
+                    reasoning = results.get("reasoning", "")
+                    if reasoning:
+                        summary_parts.append("")
+                        summary_parts.append(f"**Step 7 — Reasoning Agent:**")
+                        summary_parts.append(f"_{reasoning}_")
+
                     # Render
                     for part in summary_parts:
                         st.markdown(part)
