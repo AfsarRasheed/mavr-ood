@@ -115,22 +115,15 @@ def create_predicted_mask(image_np, masks, selected_idx):
     if masks is None:
         return pred_mask
 
-    # Handle single or multiple selected indices
-    if isinstance(selected_idx, list):
-        indices = selected_idx
-    elif selected_idx is not None:
-        indices = [selected_idx]
-    else:
-        return pred_mask
-
-    for idx in indices:
-        if idx < len(masks):
-            mask = masks[idx]
-            if hasattr(mask, 'cpu'):
-                mask = mask.cpu().numpy()
-            if mask.ndim == 3:
-                mask = mask[0]
-            pred_mask = np.maximum(pred_mask, (mask > 0).astype(np.uint8))
+    # SAM generates masks only for the selected objects,
+    # so final_masks are already filtered. Use ALL of them.
+    for i in range(len(masks)):
+        mask = masks[i]
+        if hasattr(mask, 'cpu'):
+            mask = mask.cpu().numpy()
+        if mask.ndim == 3:
+            mask = mask[0]
+        pred_mask = np.maximum(pred_mask, (mask > 0).astype(np.uint8))
 
     return pred_mask
 
