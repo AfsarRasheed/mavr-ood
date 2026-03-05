@@ -75,27 +75,18 @@ st.markdown("""
 <style>
     .main-header {
         text-align: center;
-        padding: 1.2rem 0;
-        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+        padding: 1.5rem 0;
+        background: #ffffff;
         border-radius: 12px;
         margin-bottom: 1.5rem;
-        border: 1px solid #30363d;
+        border: 1px solid #e0e0e0;
     }
     .main-header h1 {
-        font-size: 1.8rem;
-        margin-bottom: 0.3rem;
-        color: #58a6ff;
-        letter-spacing: 2px;
-    }
-    .main-header p {
-        font-size: 0.9rem;
-        color: #8b949e;
-        margin: 0;
-    }
-    .main-header .pipeline {
-        font-size: 0.75rem;
-        color: #6e7681;
-        margin-top: 0.5rem;
+        font-size: 1.6rem;
+        margin-bottom: 0;
+        color: #1a1a2e;
+        letter-spacing: 1px;
+        font-weight: 700;
     }
     .step-header {
         color: #58a6ff;
@@ -120,11 +111,7 @@ st.markdown("""
 # =====================
 st.markdown("""
 <div class="main-header">
-    <h1> MAVR</h1>
-    <p>Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments</p>
-    <p class="pipeline">
-        Pipeline: LLaVA-7B → GroundingDINO → CLIP Verification → SAM Segmentation
-    </p>
+    <h1>Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments</h1>
 </div>
 """, unsafe_allow_html=True)
 
