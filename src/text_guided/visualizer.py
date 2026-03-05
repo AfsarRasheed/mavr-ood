@@ -30,12 +30,21 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
         objects = scene_result.get("objects", [])
         scene_text.append(f"Scene: {scene_type}")
         scene_text.append(f"Lighting: {lighting}")
-        scene_text.append(f"Objects found: {len(objects)}")
-        for i, obj in enumerate(objects[:10]):
-            name = obj.get("name", "?")
-            pos = obj.get("position", "?")
-            color = obj.get("color", "")
-            scene_text.append(f"  {i+1}. {name} ({color}, {pos})")
+        scene_text.append(f"Objects: {len(objects)} identified")
+        # Group objects by name and show counts
+        from collections import Counter
+        obj_names = [obj.get("name", "?").lower().strip() for obj in objects]
+        counts = Counter(obj_names)
+        # Build grouped summary lines (fit ~3 items per line)
+        items = [f"{name} ({count})" for name, count in counts.most_common()]
+        line = "  "
+        for item in items:
+            if len(line) + len(item) > 45:
+                scene_text.append(line.rstrip(", "))
+                line = "  "
+            line += item + ", "
+        if line.strip():
+            scene_text.append(line.rstrip(", "))
     else:
         scene_text.append("Scene analysis unavailable")
 
