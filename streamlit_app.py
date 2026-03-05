@@ -62,7 +62,7 @@ def _load_backend():
 # =====================
 st.set_page_config(
     page_title="MAVR-OOD",
-    page_icon="🔍",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -120,7 +120,7 @@ st.markdown("""
 # =====================
 st.markdown("""
 <div class="main-header">
-    <h1>🔍 MAVR</h1>
+    <h1> MAVR</h1>
     <p>Multi-Agent Vision-Language Reasoning for Reliable Object Localization in Road Environments</p>
     <p class="pipeline">
         Pipeline: LLaVA-7B → GroundingDINO → CLIP Verification → SAM Segmentation
@@ -133,7 +133,7 @@ st.markdown("""
 # Sidebar
 # =====================
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header(" Settings")
 
     clip_threshold = st.slider(
         "CLIP Threshold",
@@ -147,7 +147,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown("### 🧠 Pipeline Agents")
+    st.markdown("###  Pipeline Agents")
     st.markdown("""
     **Text-Guided Mode:**
     - Scene Understanding Agent (LLaVA)
@@ -173,7 +173,7 @@ with st.sidebar:
 # =====================
 # Tabs
 # =====================
-tab1, tab2 = st.tabs(["🎯 Text-Guided Detection", "🔬 OOD Detection"])
+tab1, tab2 = st.tabs([" Text-Guided Detection", " OOD Detection"])
 
 
 # =====================
@@ -211,7 +211,7 @@ with tab1:
 
         st.image(tg_image_pil, caption="Uploaded Image", use_container_width=True)
 
-        tg_run = st.button("🔍 Detect Object", type="primary", use_container_width=True, key="tg_run")
+        tg_run = st.button(" Detect Object", type="primary", use_container_width=True, key="tg_run")
 
         if tg_run:
             if not user_prompt or not user_prompt.strip():
@@ -229,13 +229,13 @@ with tab1:
                     from src.text_guided.scene_agent import scene_understanding
                     from src.text_guided.attribute_agent import attribute_matching_agent
 
-                    st.write("🔄 Running Scene Understanding Agent...")
+                    st.write(" Running Scene Understanding Agent...")
                     scene_result = scene_understanding(temp_path)
-                    st.write("✅ Scene analysis complete")
+                    st.write(" Scene analysis complete")
 
-                    st.write("🔄 Running Attribute Matching Agent...")
+                    st.write(" Running Attribute Matching Agent...")
                     attr_result = attribute_matching_agent(temp_path, scene_result, user_prompt)
-                    st.write("✅ Attribute matching complete")
+                    st.write(" Attribute matching complete")
 
                     status1.update(label="Phase 1: LLaVA agents complete!", state="complete")
 
@@ -257,13 +257,13 @@ with tab1:
                 # Phase 2: Detection pipeline
                 status2 = st.status("Phase 2: Running detection pipeline...", expanded=True)
                 with status2:
-                    st.write("🔄 Loading detection models...")
+                    st.write(" Loading detection models...")
                     backend = _load_backend()
                     gdino = backend["load_gdino_model"]()
                     sam = backend["load_sam_predictor"]()
                     clip_v = backend["load_clip_verifier"]()
 
-                    st.write(f"🔍 Running pipeline: '{user_prompt}'...")
+                    st.write(f" Running pipeline: '{user_prompt}'...")
                     results = run_text_guided_pipeline(
                         image_np=tg_image_np,
                         user_prompt=user_prompt,
@@ -276,12 +276,12 @@ with tab1:
                         precomputed_scene=scene_result,
                         precomputed_attr=attr_result,
                     )
-                    st.write("✅ Detection complete!")
+                    st.write(" Detection complete!")
                     status2.update(label="Phase 2: Detection complete!", state="complete")
 
                 # === Show Results ===
                 st.divider()
-                st.subheader("📊 Step-by-Step Pipeline Results")
+                st.subheader(" Step-by-Step Pipeline Results")
 
                 step_images = results.get("step_images", {})
                 step_names = [
@@ -311,7 +311,7 @@ with tab1:
 
                 # Pipeline Summary
                 st.divider()
-                with st.expander("📋 Pipeline Summary", expanded=True):
+                with st.expander(" Pipeline Summary", expanded=True):
                     # Build clean summary from results
                     summary_parts = []
 
@@ -357,7 +357,7 @@ with tab1:
                         summary_parts.append(f"**Step 5 — Spatial Filter:** No filter (keeping all {n_sel})")
 
                     # Step 6: SAM
-                    summary_parts.append(f"**Step 6 — SAM Segmentation:** ✅ Complete")
+                    summary_parts.append(f"**Step 6 — SAM Segmentation:**  Complete")
 
                     # Render
                     for part in summary_parts:
@@ -394,7 +394,7 @@ with tab2:
 
         st.image(ood_image_pil, caption="Uploaded Image", use_container_width=True)
 
-        ood_run = st.button("🔬 Run OOD Detection", type="primary", use_container_width=True, key="ood_run")
+        ood_run = st.button(" Run OOD Detection", type="primary", use_container_width=True, key="ood_run")
 
         if ood_run:
             # Save temp image
@@ -406,10 +406,10 @@ with tab2:
             status = st.status("Running multi-agent analysis...", expanded=True)
 
             with status:
-                st.write("🔄 Running 5 LLaVA agents...")
+                st.write(" Running 5 LLaVA agents...")
                 backend = _load_backend()
                 agent_results = backend["run_agents_on_image"](tmp_path)
-                st.write("✅ All 5 agents completed")
+                st.write(" All 5 agents completed")
 
                 prompt_v1, prompt_v2 = backend["extract_prompts"](agent_results)
                 st.write(f"Prompt V1: **{prompt_v1}**")
@@ -436,12 +436,12 @@ with tab2:
             status2 = st.status("Running detection pipeline...", expanded=True)
 
             with status2:
-                st.write("🔄 Loading detection models...")
+                st.write(" Loading detection models...")
                 gdino = backend["load_gdino_model"]()
                 predictor = backend["load_sam_predictor"]()
                 clip_verifier = backend["load_clip_verifier"]()
 
-                st.write(f"🔍 Detecting with prompt: '{prompt_v1}'...")
+                st.write(f" Detecting with prompt: '{prompt_v1}'...")
                 image_tensor = backend["preprocess_image"](ood_image_pil)
 
                 boxes, labels, scores = backend["get_grounding_output"](
@@ -450,7 +450,7 @@ with tab2:
                 )
 
                 if len(boxes) == 0 and prompt_v2 != prompt_v1:
-                    st.write(f"🔄 Trying prompt V2: '{prompt_v2}'...")
+                    st.write(f" Trying prompt V2: '{prompt_v2}'...")
                     boxes, labels, scores = backend["get_grounding_output"](
                         gdino, image_tensor, prompt_v2,
                         box_threshold=box_threshold, text_threshold=0.25
@@ -458,7 +458,7 @@ with tab2:
 
                 # CLIP verification
                 if len(boxes) > 0:
-                    st.write("🔍 CLIP semantic verification...")
+                    st.write(" CLIP semantic verification...")
                     try:
                         H, W = ood_image_np.shape[:2]
                         clip_boxes = boxes.clone()
@@ -480,23 +480,23 @@ with tab2:
                             boxes = boxes_back
                             labels = filtered_phrases
                     except Exception as e:
-                        st.write(f"⚠️ CLIP warning: {e}")
+                        st.write(f" CLIP warning: {e}")
 
                 # SAM segmentation
                 masks = None
                 boxes_xyxy = None
                 if len(boxes) > 0:
-                    st.write("🔄 Running SAM segmentation...")
+                    st.write(" Running SAM segmentation...")
                     masks, boxes_xyxy = backend["run_sam_segmentation"](predictor, ood_image_np, boxes)
-                    st.write(f"✅ Found {len(boxes)} detections")
+                    st.write(f" Found {len(boxes)} detections")
                 else:
-                    st.write("⚠️ No detections found")
+                    st.write(" No detections found")
 
                 status2.update(label="Detection complete!", state="complete")
 
             # === Results ===
             st.divider()
-            st.subheader("📊 Detection Results")
+            st.subheader(" Detection Results")
 
             # Metrics
             m1, m2, m3 = st.columns(3)
@@ -541,7 +541,7 @@ with tab2:
                 # Ground truth comparison
                 if gt_mask_file is not None:
                     st.divider()
-                    st.subheader("📐 Evaluation Metrics")
+                    st.subheader(" Evaluation Metrics")
 
                     gt_mask = np.array(Image.open(gt_mask_file).convert("L"))
                     gt_binary = (gt_mask > 0).astype(np.float32)
@@ -591,7 +591,7 @@ with tab2:
 
             # Agent Analysis
             st.divider()
-            with st.expander("🧠 Agent Analysis", expanded=False):
+            with st.expander(" Agent Analysis", expanded=False):
                 for i, (name, key) in enumerate([
                     ("Agent 1 — Scene Context", "agent1"),
                     ("Agent 2 — Spatial Anomaly", "agent2"),
