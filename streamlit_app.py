@@ -122,16 +122,8 @@ st.markdown("""
 with st.sidebar:
     st.header(" Settings")
 
-    clip_threshold = st.slider(
-        "CLIP Threshold",
-        min_value=0.10, max_value=0.50, value=0.25, step=0.05,
-        help="Lower = more detections, Higher = stricter filtering"
-    )
-    box_threshold = st.slider(
-        "Box Threshold (GroundingDINO)",
-        min_value=0.15, max_value=0.50, value=0.35, step=0.05,
-        help="Confidence threshold for GroundingDINO candidates"
-    )
+    clip_threshold = 0.25
+    box_threshold = 0.35
 
     st.divider()
     st.markdown("###  Pipeline Agents")
