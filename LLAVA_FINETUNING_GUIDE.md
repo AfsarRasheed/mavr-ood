@@ -1,6 +1,16 @@
 # Fine-Tuning LLaVA-7B with LoRA on Road Scene Images
 
-Complete end-to-end guide to fine-tune LLaVA-7B on your BDD road images using LoRA on Google Colab (free T4 GPU).
+Complete end-to-end guide to fine-tune LLaVA-7B on your BDD road images using LoRA on Google Colab.
+
+### GPU Comparison
+
+| | T4 (16GB) | A100 (40/80GB) |
+|---|-----------|----------------|
+| Model loading | 4-bit quantized | Full float16 (better quality) |
+| Batch size | 1 | 4 |
+| LoRA rank | 16 | 32 (better adaptation) |
+| Training time (250 samples) | 45-60 min | **10-15 min** |
+| Total effort | ~4-5 hours | ~3-4 hours |
 
 ---
 
@@ -145,7 +155,7 @@ print(f"[OK] {len(data)} training samples loaded")
 print(f"[OK] Sample: {data[0]['conversations'][0]['value'][:60]}...")
 ```
 
-### Cell 4 — Load LLaVA Model (4-bit Quantized)
+### Cell 4 — Load LLaVA Model
 
 ```python
 import torch
@@ -157,21 +167,35 @@ from transformers import (
 
 model_id = "llava-hf/llava-1.5-7b-hf"
 
-# 4-bit quantization for Colab T4
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-)
+# Detect GPU type
+gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+is_a100 = "A100" in gpu_name
+print(f"[OK] GPU: {gpu_name} ({'A100 mode' if is_a100 else 'T4 mode'})")
 
-print("Loading LLaVA-7B (4-bit)... this takes ~3 minutes")
-model = LlavaForConditionalGeneration.from_pretrained(
-    model_id,
-    quantization_config=bnb_config,
-    device_map="auto",
-    torch_dtype=torch.float16,
-)
+if is_a100:
+    # A100: Load in full float16 (better quality, faster)
+    print("Loading LLaVA-7B (float16 — A100 mode)... ~1 minute")
+    model = LlavaForConditionalGeneration.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16,
+        device_map="auto",
+    )
+else:
+    # T4: Load in 4-bit quantized (saves VRAM)
+    print("Loading LLaVA-7B (4-bit — T4 mode)... ~3 minutes")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_use_double_quant=True,
+    )
+    model = LlavaForConditionalGeneration.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch.float16,
+    )
+
 processor = AutoProcessor.from_pretrained(model_id)
 processor.tokenizer.pad_token = processor.tokenizer.eos_token
 
@@ -187,10 +211,13 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 # Prepare for training
 model = prepare_model_for_kbit_training(model)
 
-# LoRA config
+# LoRA config — auto-selects based on GPU
+gpu_name = torch.cuda.get_device_name(0)
+is_a100 = "A100" in gpu_name
+
 lora_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
+    r=32 if is_a100 else 16,           # A100: higher rank = better adaptation
+    lora_alpha=64 if is_a100 else 32,
     target_modules=[
         "q_proj", "v_proj",     # attention layers
         "k_proj", "o_proj",     # more attention layers
@@ -202,9 +229,8 @@ lora_config = LoraConfig(
 
 model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
-# Should show ~0.06% trainable params (about 4M out of 7B)
 
-print("[OK] LoRA adapters added")
+print(f"[OK] LoRA adapters added (rank={32 if is_a100 else 16})")
 ```
 
 ### Cell 6 — Create Training Dataset
@@ -284,11 +310,19 @@ print(f"[OK] Sample shape: {dataset[0]['input_ids'].shape}")
 ```python
 from transformers import TrainingArguments, Trainer
 
+gpu_name = torch.cuda.get_device_name(0)
+is_a100 = "A100" in gpu_name
+
+# Auto-configure based on GPU
+batch_size = 4 if is_a100 else 1
+grad_accum = 2 if is_a100 else 4
+est_time = "10-15 minutes" if is_a100 else "45-60 minutes"
+
 training_args = TrainingArguments(
     output_dir="/content/lora_output",
     num_train_epochs=3,
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=4,
+    per_device_train_batch_size=batch_size,
+    gradient_accumulation_steps=grad_accum,
     learning_rate=2e-4,
     warmup_steps=10,
     fp16=True,
@@ -306,11 +340,11 @@ trainer = Trainer(
     train_dataset=dataset,
 )
 
-print("Starting training...")
+print(f"Starting training ({gpu_name})...")
 print(f"  Samples: {len(dataset)}")
 print(f"  Epochs: 3")
-print(f"  Batch size: 1 (× 4 accumulation = effective 4)")
-print(f"  Estimated time: 30-60 minutes on T4\n")
+print(f"  Batch size: {batch_size} (× {grad_accum} accumulation = effective {batch_size * grad_accum})")
+print(f"  Estimated time: {est_time}\n")
 
 trainer.train()
 
@@ -392,13 +426,13 @@ This loads the base model + applies your fine-tuned adapter on top.
 
 ## Summary
 
-| Step | What | Time |
-|------|------|------|
-| 1 | Prepare 50 images + JSON Q&A pairs | 2-4 hours (manual) |
-| 2 | Install & load model | 5 minutes |
-| 3 | Apply LoRA | 1 minute |
-| 4 | Train (3 epochs) | 30-60 minutes |
-| 5 | Save adapter (~50MB) | 1 minute |
-| 6 | Integrate into MAVR | 10 minutes |
+| Step | What | Time (T4) | Time (A100) |
+|------|------|-----------|-------------|
+| 1 | Prepare 50 images + JSON Q&A pairs | 2-4 hours | 2-4 hours |
+| 2 | Install & load model | 5 min | 2 min |
+| 3 | Apply LoRA | 1 min | 1 min |
+| 4 | Train (3 epochs, 250 samples) | 45-60 min | **10-15 min** |
+| 5 | Save adapter (~50MB) | 1 min | 1 min |
+| 6 | Integrate into MAVR | 10 min | 10 min |
 
-**Total effort: ~4-5 hours (mostly data preparation)**
+**Total effort: ~4-5 hours on T4, ~3-4 hours on A100 (mostly data preparation)**
