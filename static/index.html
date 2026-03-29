@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAVR-OOD | Multi-Agent Vision System</title>
+    <meta name="description" content="Multi-Agent Vision-Language System for Reliable Object Localization">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-icon">🔍</span>
+                <div>
+                    <h1>MAVR-OOD</h1>
+                    <p class="subtitle">Multi-Agent Vision-Language System</p>
+                </div>
+            </div>
+            <div class="header-badge" id="gpuBadge">
+                <span class="badge-dot"></span>
+                <span id="gpuName">Loading...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+
+        <!-- Upload & Query Section -->
+        <section class="input-section">
+            <div class="upload-card glass-card" id="uploadCard">
+                <div class="upload-zone" id="dropZone">
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                    <img id="imagePreview" class="image-preview" style="display:none">
+                    <div class="upload-placeholder" id="uploadPlaceholder">
+                        <div class="upload-icon">📁</div>
+                        <p class="upload-title">Drop image here</p>
+                        <p class="upload-hint">or click to browse</p>
+                    </div>
+                </div>
+                <button class="btn-clear" id="clearBtn" style="display:none" onclick="clearImage()">✕ Clear</button>
+            </div>
+
+            <div class="query-card glass-card">
+                <label class="input-label">Search Query</label>
+                <div class="query-input-wrapper">
+                    <input type="text" id="queryInput" class="query-input" 
+                           placeholder='e.g. "the red car on the left"'
+                           onkeydown="if(event.key==='Enter') runDetection()">
+                    <button class="btn-detect" id="detectBtn" onclick="runDetection()">
+                        <span class="btn-text">Detect</span>
+                        <span class="btn-loader" style="display:none"></span>
+                    </button>
+                </div>
+
+                <div class="query-examples">
+                    <span class="example-label">Try:</span>
+                    <button class="example-chip" onclick="setQuery('the red car on the left')">red car on left</button>
+                    <button class="example-chip" onclick="setQuery('the largest vehicle')">largest vehicle</button>
+                    <button class="example-chip" onclick="setQuery('the car next to the truck')">car next to truck</button>
+                    <button class="example-chip" onclick="setQuery('detect the pedestrian')">pedestrian</button>
+                </div>
+
+                <!-- Pipeline Agents -->
+                <div class="agents-list">
+                    <div class="agent-item">
+                        <span class="agent-num">1</span>
+                        <span class="agent-name">Scene Understanding</span>
+                        <span class="agent-model">LLaVA-7B</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">2</span>
+                        <span class="agent-name">Attribute Matching</span>
+                        <span class="agent-model">LLaVA-7B</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">3</span>
+                        <span class="agent-name">Object Detection</span>
+                        <span class="agent-model">GroundingDINO</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">4</span>
+                        <span class="agent-name">Semantic Verify</span>
+                        <span class="agent-model">CLIP ViT-B/32</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">5</span>
+                        <span class="agent-name">Spatial Filter</span>
+                        <span class="agent-model">Rule Engine</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">6</span>
+                        <span class="agent-name">Segmentation</span>
+                        <span class="agent-model">SAM ViT-H</span>
+                    </div>
+                    <div class="agent-item">
+                        <span class="agent-num">7</span>
+                        <span class="agent-name">Reasoning</span>
+                        <span class="agent-model">LLaVA-7B</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pipeline Progress -->
+        <section class="progress-section glass-card" id="progressSection" style="display:none">
+            <div class="progress-header">
+                <h2>Pipeline Progress</h2>
+                <span class="progress-time" id="progressTime">0.0s</span>
+            </div>
+            <div class="pipeline-steps">
+                <div class="p-step" data-step="1"><div class="p-step-dot"></div><span>Scene</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="2"><div class="p-step-dot"></div><span>Attribute</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="3"><div class="p-step-dot"></div><span>GDINO</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="4"><div class="p-step-dot"></div><span>CLIP</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="5"><div class="p-step-dot"></div><span>Spatial</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="6"><div class="p-step-dot"></div><span>SAM</span></div>
+                <div class="p-step-line"></div>
+                <div class="p-step" data-step="7"><div class="p-step-dot"></div><span>Reason</span></div>
+            </div>
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progressBar"></div>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section class="results-section" id="resultsSection" style="display:none">
+
+            <!-- Image Comparison -->
+            <div class="comparison-wrapper glass-card">
+                <h2>Detection Result</h2>
+                <div class="comparison-container" id="comparisonContainer">
+                    <img class="comp-img comp-before" id="compBefore" alt="Original">
+                    <div class="comp-overlay" id="compOverlay">
+                        <img class="comp-img comp-after" id="compAfter" alt="Detection">
+                    </div>
+                    <div class="comp-handle" id="compHandle">
+                        <div class="comp-handle-line"></div>
+                        <div class="comp-handle-circle">⟷</div>
+                        <div class="comp-handle-line"></div>
+                    </div>
+                    <div class="comp-label comp-label-left">Original</div>
+                    <div class="comp-label comp-label-right">Detection</div>
+                </div>
+            </div>
+
+            <!-- Metrics Row -->
+            <div class="metrics-row">
+                <div class="metric-card glass-card">
+                    <div class="metric-icon">⏱</div>
+                    <div class="metric-value" id="metricTime">-</div>
+                    <div class="metric-label">Total Time</div>
+                </div>
+                <div class="metric-card glass-card">
+                    <div class="metric-icon">🧠</div>
+                    <div class="metric-value" id="metricParser">-</div>
+                    <div class="metric-label">Parser Mode</div>
+                </div>
+                <div class="metric-card glass-card">
+                    <div class="metric-icon">📍</div>
+                    <div class="metric-value" id="metricSpatial">-</div>
+                    <div class="metric-label">Spatial</div>
+                </div>
+                <div class="metric-card glass-card">
+                    <div class="metric-icon">🎯</div>
+                    <div class="metric-value" id="metricObject">-</div>
+                    <div class="metric-label">Object</div>
+                </div>
+            </div>
+
+            <!-- Step Viewer -->
+            <div class="steps-viewer glass-card">
+                <h2>Pipeline Steps</h2>
+                <div class="step-tabs" id="stepTabs"></div>
+                <div class="step-image-container">
+                    <img id="stepImage" class="step-image" alt="Pipeline step visualization">
+                </div>
+            </div>
+
+            <!-- Reasoning -->
+            <div class="reasoning-card glass-card">
+                <h2>🤖 Reasoning Agent</h2>
+                <p class="reasoning-text" id="reasoningText"></p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>MAVR-OOD • Multi-Agent Vision-Language System • 2026</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
