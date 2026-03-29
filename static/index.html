@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MAVR-OOD | Multi-Agent Vision System</title>
-    <meta name="description" content="Multi-Agent Vision-Language System for Reliable Object Localization">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <meta name="description" content="Multi-Agent Vision-Language System for Reliable Object Localization and OOD Detection">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -13,20 +13,25 @@
     <div class="bg-grid"></div>
     <div class="bg-glow glow-1"></div>
     <div class="bg-glow glow-2"></div>
+    <div class="bg-glow glow-3"></div>
 
     <!-- Header -->
     <header class="header">
         <div class="header-content">
             <div class="logo">
-                <span class="logo-icon">🔍</span>
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                </div>
                 <div>
                     <h1>MAVR-OOD</h1>
-                    <p class="subtitle">Multi-Agent Vision-Language System</p>
+                    <p class="subtitle">Multi-Agent Vision System</p>
                 </div>
             </div>
             <div class="header-badge" id="gpuBadge">
                 <span class="badge-dot"></span>
-                <span id="gpuName">Loading...</span>
+                <span id="gpuName">Connecting...</span>
             </div>
         </div>
     </header>
@@ -34,173 +39,296 @@
     <!-- Main Content -->
     <main class="container">
 
-        <!-- Upload & Query Section -->
-        <section class="input-section">
-            <div class="upload-card glass-card" id="uploadCard">
-                <div class="upload-zone" id="dropZone">
-                    <input type="file" id="fileInput" accept="image/*" hidden>
-                    <img id="imagePreview" class="image-preview" style="display:none">
-                    <div class="upload-placeholder" id="uploadPlaceholder">
-                        <div class="upload-icon">📁</div>
-                        <p class="upload-title">Drop image here</p>
-                        <p class="upload-hint">or click to browse</p>
+        <!-- Navigation Tabs -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('guided')" id="tabGuided">
+                <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                Text-Guided Detection
+            </button>
+            <button class="nav-tab" onclick="switchTab('ood')" id="tabOod">
+                <svg class="nav-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                OOD Detection
+            </button>
+        </div>
+
+        <!-- ═══ TAB 1: Text-Guided Detection ═══ -->
+        <div class="tab-content active" id="guidedTab">
+
+            <!-- Upload & Query Section -->
+            <section class="input-section">
+                <div class="upload-card glass-card" id="uploadCard">
+                    <div class="upload-zone" id="dropZone">
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                        <img id="imagePreview" class="image-preview" style="display:none">
+                        <div class="upload-placeholder" id="uploadPlaceholder">
+                            <div class="upload-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                            </div>
+                            <p class="upload-title">Drop image here</p>
+                            <p class="upload-hint">or click to browse files</p>
+                        </div>
+                    </div>
+                    <button class="btn-clear" id="clearBtn" style="display:none" onclick="clearImage()">Clear</button>
+                </div>
+
+                <div class="query-card glass-card">
+                    <label class="input-label">Search Query</label>
+                    <div class="query-input-wrapper">
+                        <input type="text" id="queryInput" class="query-input" 
+                               placeholder='e.g. "the red car on the left"'
+                               onkeydown="if(event.key==='Enter') runDetection()">
+                        <button class="btn-detect" id="detectBtn" onclick="runDetection()">
+                            <span class="btn-text">Detect</span>
+                            <span class="btn-loader" style="display:none"></span>
+                        </button>
+                    </div>
+
+                    <div class="query-examples">
+                        <span class="example-label">Try</span>
+                        <button class="example-chip" onclick="setQuery('the red car on the left')">red car on left</button>
+                        <button class="example-chip" onclick="setQuery('the largest vehicle')">largest vehicle</button>
+                        <button class="example-chip" onclick="setQuery('the car next to the truck')">car next to truck</button>
+                        <button class="example-chip" onclick="setQuery('detect the pedestrian')">pedestrian</button>
+                    </div>
+
+                    <div class="agents-list">
+                        <div class="agent-item">
+                            <span class="agent-num">1</span>
+                            <span class="agent-name">Scene Understanding</span>
+                            <span class="agent-model">LLaVA-7B</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">2</span>
+                            <span class="agent-name">Attribute Matching</span>
+                            <span class="agent-model">LLaVA-7B</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">3</span>
+                            <span class="agent-name">Object Detection</span>
+                            <span class="agent-model">GroundingDINO</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">4</span>
+                            <span class="agent-name">Semantic Verification</span>
+                            <span class="agent-model">CLIP ViT-B/32</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">5</span>
+                            <span class="agent-name">Spatial Filtering</span>
+                            <span class="agent-model">Rule Engine</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">6</span>
+                            <span class="agent-name">Segmentation</span>
+                            <span class="agent-model">SAM ViT-H</span>
+                        </div>
+                        <div class="agent-item">
+                            <span class="agent-num">7</span>
+                            <span class="agent-name">Reasoning</span>
+                            <span class="agent-model">LLaVA-7B</span>
+                        </div>
                     </div>
                 </div>
-                <button class="btn-clear" id="clearBtn" style="display:none" onclick="clearImage()">✕ Clear</button>
-            </div>
+            </section>
 
-            <div class="query-card glass-card">
-                <label class="input-label">Search Query</label>
-                <div class="query-input-wrapper">
-                    <input type="text" id="queryInput" class="query-input" 
-                           placeholder='e.g. "the red car on the left"'
-                           onkeydown="if(event.key==='Enter') runDetection()">
-                    <button class="btn-detect" id="detectBtn" onclick="runDetection()">
-                        <span class="btn-text">Detect</span>
+            <!-- Error Banner -->
+            <div class="error-banner" id="errorBanner"></div>
+
+            <!-- Pipeline Progress -->
+            <section class="progress-section glass-card" id="progressSection" style="display:none">
+                <div class="progress-header">
+                    <h2 class="section-title">Pipeline Execution</h2>
+                    <span class="progress-time" id="progressTime">0.0s</span>
+                </div>
+                <div class="pipeline-steps">
+                    <div class="p-step" data-step="1"><div class="p-step-dot"></div><span>Scene</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="2"><div class="p-step-dot"></div><span>Attribute</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="3"><div class="p-step-dot"></div><span>GDINO</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="4"><div class="p-step-dot"></div><span>CLIP</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="5"><div class="p-step-dot"></div><span>Spatial</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="6"><div class="p-step-dot"></div><span>SAM</span></div>
+                    <div class="p-step-line"></div>
+                    <div class="p-step" data-step="7"><div class="p-step-dot"></div><span>Reasoning</span></div>
+                </div>
+                <div class="progress-bar-track">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display:none">
+
+                <!-- Image Comparison -->
+                <div class="comparison-wrapper glass-card">
+                    <h2 class="section-title">Detection Result</h2>
+                    <div class="comparison-container" id="comparisonContainer">
+                        <img class="comp-img comp-before" id="compBefore" alt="Original">
+                        <div class="comp-overlay" id="compOverlay">
+                            <img class="comp-img comp-after" id="compAfter" alt="Detection">
+                        </div>
+                        <div class="comp-handle" id="compHandle">
+                            <div class="comp-handle-line"></div>
+                            <div class="comp-handle-circle">&#x21D4;</div>
+                            <div class="comp-handle-line"></div>
+                        </div>
+                        <div class="comp-label comp-label-left">Original</div>
+                        <div class="comp-label comp-label-right">Detection</div>
+                    </div>
+                </div>
+
+                <!-- Metrics Row -->
+                <div class="metrics-row">
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </div>
+                        <div class="metric-value" id="metricTime">--</div>
+                        <div class="metric-label">Total Time</div>
+                    </div>
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M12 8v4l3 3"/></svg>
+                        </div>
+                        <div class="metric-value" id="metricParser">--</div>
+                        <div class="metric-label">Parser Mode</div>
+                    </div>
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        </div>
+                        <div class="metric-value" id="metricSpatial">--</div>
+                        <div class="metric-label">Spatial</div>
+                    </div>
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        </div>
+                        <div class="metric-value" id="metricObject">--</div>
+                        <div class="metric-label">Target Object</div>
+                    </div>
+                </div>
+
+                <!-- Step Viewer -->
+                <div class="steps-viewer glass-card">
+                    <h2 class="section-title">Pipeline Visualization</h2>
+                    <div class="step-tabs" id="stepTabs"></div>
+                    <div class="step-image-container">
+                        <img id="stepImage" class="step-image" alt="Pipeline step">
+                    </div>
+                </div>
+
+                <!-- Reasoning -->
+                <div class="reasoning-card glass-card">
+                    <h2 class="section-title">Reasoning Agent Output</h2>
+                    <p class="reasoning-text" id="reasoningText"></p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ═══ TAB 2: OOD Detection ═══ -->
+        <div class="tab-content" id="oodTab">
+            <section class="ood-input-section">
+                <div class="glass-card">
+                    <label class="input-label">Upload Road Scene</label>
+                    <div class="upload-zone" id="oodDropZone">
+                        <input type="file" id="oodFileInput" accept="image/*" hidden>
+                        <img id="oodImagePreview" class="image-preview" style="display:none">
+                        <div class="upload-placeholder" id="oodUploadPlaceholder">
+                            <div class="upload-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                            </div>
+                            <p class="upload-title">Drop road scene image</p>
+                            <p class="upload-hint">Detect anomalous objects automatically</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card">
+                    <label class="input-label">Ground Truth Mask (Optional)</label>
+                    <div class="upload-zone" id="gtDropZone" style="min-height:200px">
+                        <input type="file" id="gtFileInput" accept="image/png" hidden>
+                        <img id="gtImagePreview" class="image-preview" style="display:none">
+                        <div class="upload-placeholder" id="gtUploadPlaceholder">
+                            <div class="upload-icon" style="background: linear-gradient(135deg, #f43f5e, #f59e0b);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <line x1="3" y1="9" x2="21" y2="9"/>
+                                    <line x1="9" y1="21" x2="9" y2="9"/>
+                                </svg>
+                            </div>
+                            <p class="upload-title">Upload ground truth</p>
+                            <p class="upload-hint">PNG mask for evaluation metrics</p>
+                        </div>
+                    </div>
+
+                    <button class="btn-detect" id="oodDetectBtn" style="width:100%;justify-content:center;margin-top:16px" onclick="runOodDetection()">
+                        <span class="btn-text">Run OOD Detection</span>
                         <span class="btn-loader" style="display:none"></span>
                     </button>
                 </div>
+            </section>
 
-                <div class="query-examples">
-                    <span class="example-label">Try:</span>
-                    <button class="example-chip" onclick="setQuery('the red car on the left')">red car on left</button>
-                    <button class="example-chip" onclick="setQuery('the largest vehicle')">largest vehicle</button>
-                    <button class="example-chip" onclick="setQuery('the car next to the truck')">car next to truck</button>
-                    <button class="example-chip" onclick="setQuery('detect the pedestrian')">pedestrian</button>
+            <!-- OOD Results -->
+            <section id="oodResults" style="display:none">
+                <!-- OOD Metrics -->
+                <div class="ood-metrics-row" id="oodMetrics">
+                    <div class="ood-metric glass-card">
+                        <div class="ood-metric-value" id="oodIou">--</div>
+                        <div class="metric-label">mIoU</div>
+                        <div class="ood-metric-bar"><div class="ood-metric-bar-fill" id="oodIouBar" style="width:0%"></div></div>
+                    </div>
+                    <div class="ood-metric glass-card">
+                        <div class="ood-metric-value" id="oodF1">--</div>
+                        <div class="metric-label">F1 Score</div>
+                        <div class="ood-metric-bar"><div class="ood-metric-bar-fill" id="oodF1Bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="ood-metric glass-card">
+                        <div class="ood-metric-value" id="oodPrecision">--</div>
+                        <div class="metric-label">Precision</div>
+                        <div class="ood-metric-bar"><div class="ood-metric-bar-fill" id="oodPrecisionBar" style="width:0%"></div></div>
+                    </div>
+                    <div class="ood-metric glass-card">
+                        <div class="ood-metric-value" id="oodRecall">--</div>
+                        <div class="metric-label">Recall</div>
+                        <div class="ood-metric-bar"><div class="ood-metric-bar-fill" id="oodRecallBar" style="width:0%"></div></div>
+                    </div>
                 </div>
 
-                <!-- Pipeline Agents -->
-                <div class="agents-list">
-                    <div class="agent-item">
-                        <span class="agent-num">1</span>
-                        <span class="agent-name">Scene Understanding</span>
-                        <span class="agent-model">LLaVA-7B</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">2</span>
-                        <span class="agent-name">Attribute Matching</span>
-                        <span class="agent-model">LLaVA-7B</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">3</span>
-                        <span class="agent-name">Object Detection</span>
-                        <span class="agent-model">GroundingDINO</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">4</span>
-                        <span class="agent-name">Semantic Verify</span>
-                        <span class="agent-model">CLIP ViT-B/32</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">5</span>
-                        <span class="agent-name">Spatial Filter</span>
-                        <span class="agent-model">Rule Engine</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">6</span>
-                        <span class="agent-name">Segmentation</span>
-                        <span class="agent-model">SAM ViT-H</span>
-                    </div>
-                    <div class="agent-item">
-                        <span class="agent-num">7</span>
-                        <span class="agent-name">Reasoning</span>
-                        <span class="agent-model">LLaVA-7B</span>
-                    </div>
-                </div>
-            </div>
-        </section>
+                <!-- OOD Result Images -->
+                <div class="ood-results-grid" id="oodResultsGrid"></div>
 
-        <!-- Pipeline Progress -->
-        <section class="progress-section glass-card" id="progressSection" style="display:none">
-            <div class="progress-header">
-                <h2>Pipeline Progress</h2>
-                <span class="progress-time" id="progressTime">0.0s</span>
-            </div>
-            <div class="pipeline-steps">
-                <div class="p-step" data-step="1"><div class="p-step-dot"></div><span>Scene</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="2"><div class="p-step-dot"></div><span>Attribute</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="3"><div class="p-step-dot"></div><span>GDINO</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="4"><div class="p-step-dot"></div><span>CLIP</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="5"><div class="p-step-dot"></div><span>Spatial</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="6"><div class="p-step-dot"></div><span>SAM</span></div>
-                <div class="p-step-line"></div>
-                <div class="p-step" data-step="7"><div class="p-step-dot"></div><span>Reason</span></div>
-            </div>
-            <div class="progress-bar-track">
-                <div class="progress-bar-fill" id="progressBar"></div>
-            </div>
-        </section>
+                <!-- Agent Analysis -->
+                <div class="glass-card">
+                    <h2 class="section-title">Agent Analysis</h2>
+                    <div class="agent-cards-grid" id="agentCardsGrid"></div>
+                </div>
+            </section>
+        </div>
 
-        <!-- Results Section -->
-        <section class="results-section" id="resultsSection" style="display:none">
-
-            <!-- Image Comparison -->
-            <div class="comparison-wrapper glass-card">
-                <h2>Detection Result</h2>
-                <div class="comparison-container" id="comparisonContainer">
-                    <img class="comp-img comp-before" id="compBefore" alt="Original">
-                    <div class="comp-overlay" id="compOverlay">
-                        <img class="comp-img comp-after" id="compAfter" alt="Detection">
-                    </div>
-                    <div class="comp-handle" id="compHandle">
-                        <div class="comp-handle-line"></div>
-                        <div class="comp-handle-circle">⟷</div>
-                        <div class="comp-handle-line"></div>
-                    </div>
-                    <div class="comp-label comp-label-left">Original</div>
-                    <div class="comp-label comp-label-right">Detection</div>
-                </div>
-            </div>
-
-            <!-- Metrics Row -->
-            <div class="metrics-row">
-                <div class="metric-card glass-card">
-                    <div class="metric-icon">⏱</div>
-                    <div class="metric-value" id="metricTime">-</div>
-                    <div class="metric-label">Total Time</div>
-                </div>
-                <div class="metric-card glass-card">
-                    <div class="metric-icon">🧠</div>
-                    <div class="metric-value" id="metricParser">-</div>
-                    <div class="metric-label">Parser Mode</div>
-                </div>
-                <div class="metric-card glass-card">
-                    <div class="metric-icon">📍</div>
-                    <div class="metric-value" id="metricSpatial">-</div>
-                    <div class="metric-label">Spatial</div>
-                </div>
-                <div class="metric-card glass-card">
-                    <div class="metric-icon">🎯</div>
-                    <div class="metric-value" id="metricObject">-</div>
-                    <div class="metric-label">Object</div>
-                </div>
-            </div>
-
-            <!-- Step Viewer -->
-            <div class="steps-viewer glass-card">
-                <h2>Pipeline Steps</h2>
-                <div class="step-tabs" id="stepTabs"></div>
-                <div class="step-image-container">
-                    <img id="stepImage" class="step-image" alt="Pipeline step visualization">
-                </div>
-            </div>
-
-            <!-- Reasoning -->
-            <div class="reasoning-card glass-card">
-                <h2>🤖 Reasoning Agent</h2>
-                <p class="reasoning-text" id="reasoningText"></p>
-            </div>
-        </section>
     </main>
 
     <!-- Footer -->
     <footer class="footer">
-        <p>MAVR-OOD • Multi-Agent Vision-Language System • 2026</p>
+        <p><strong>MAVR-OOD</strong> &middot; LLaVA-7B &middot; GroundingDINO &middot; CLIP &middot; SAM</p>
+        <p>Multi-Agent Vision-Language Reasoning for Reliable Object Localization</p>
     </footer>
 
     <script src="/static/js/app.js"></script>

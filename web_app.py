@@ -201,6 +201,165 @@ async def detect(
             torch.cuda.empty_cache()
 
 
+# ── OOD Detection Endpoint ───────────────────────────────────
+@app.post("/api/ood_detect")
+async def ood_detect(
+    image: UploadFile = File(...),
+    gt_mask: UploadFile = File(None),
+):
+    """Run the full OOD (out-of-distribution) detection pipeline."""
+    if not models:
+        raise HTTPException(status_code=503, detail="Models not loaded yet")
+
+    img_bytes = await image.read()
+    img_pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    img_np = np.array(img_pil)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    img_pil.save(tmp.name)
+    tmp_path = tmp.name
+
+    try:
+        from src.model_loader import (
+            run_agents_on_image, extract_prompts,
+            preprocess_image, get_grounding_output,
+            run_sam_segmentation,
+            create_detection_visualization, create_mask_visualization,
+            create_binary_mask_visualization,
+        )
+
+        # Stage 1: Run 5 LLaVA agents
+        agent_results = run_agents_on_image(tmp_path)
+        prompt_v1, prompt_v2 = extract_prompts(agent_results)
+
+        # Free LLaVA from GPU
+        try:
+            import src.agents.vlm_backend as vlm_mod
+            if getattr(vlm_mod, '_model', None) is not None:
+                del vlm_mod._model; vlm_mod._model = None
+            if getattr(vlm_mod, '_processor', None) is not None:
+                del vlm_mod._processor; vlm_mod._processor = None
+            gc.collect()
+            torch.cuda.empty_cache()
+        except Exception:
+            gc.collect(); torch.cuda.empty_cache()
+
+        # Stage 2: GroundingDINO detection
+        gdino = models['gdino']
+        image_tensor = preprocess_image(img_pil)
+        boxes, labels, scores = get_grounding_output(
+            gdino, image_tensor, prompt_v1,
+            box_threshold=0.35, text_threshold=0.25
+        )
+
+        if len(boxes) == 0 and prompt_v2 != prompt_v1:
+            boxes, labels, scores = get_grounding_output(
+                gdino, image_tensor, prompt_v2,
+                box_threshold=0.35, text_threshold=0.25
+            )
+
+        # CLIP verification
+        if len(boxes) > 0 and models.get('clip'):
+            try:
+                H, W = img_np.shape[:2]
+                clip_boxes = boxes.clone()
+                clip_boxes[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * W
+                clip_boxes[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * H
+                clip_boxes[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * W
+                clip_boxes[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * H
+                models['clip'].similarity_threshold = 0.25
+                filtered_boxes, filtered_phrases, _, _ = models['clip'].verify_detections(
+                    img_np, clip_boxes, labels, prompt_v1
+                )
+                if len(filtered_boxes) > 0:
+                    boxes_back = torch.zeros(len(filtered_boxes), 4)
+                    boxes_back[:, 0] = ((filtered_boxes[:, 0] + filtered_boxes[:, 2]) / 2) / W
+                    boxes_back[:, 1] = ((filtered_boxes[:, 1] + filtered_boxes[:, 3]) / 2) / H
+                    boxes_back[:, 2] = (filtered_boxes[:, 2] - filtered_boxes[:, 0]) / W
+                    boxes_back[:, 3] = (filtered_boxes[:, 3] - filtered_boxes[:, 1]) / H
+                    boxes = boxes_back
+                    labels = filtered_phrases
+            except Exception:
+                pass
+
+        # SAM segmentation
+        masks = None
+        boxes_xyxy = None
+        if len(boxes) > 0:
+            predictor = models['sam']
+            masks, boxes_xyxy = run_sam_segmentation(predictor, img_np, boxes)
+
+        # Generate visualizations
+        result_images = {}
+        if masks is not None and boxes_xyxy is not None:
+            det_img = create_detection_visualization(img_np, boxes_xyxy, labels)
+            mask_img = create_mask_visualization(img_np, masks)
+            binary_img = create_binary_mask_visualization(img_np, masks)
+            result_images['detection'] = img_to_b64(det_img)
+            result_images['masks'] = img_to_b64(mask_img)
+            result_images['binary_mask'] = img_to_b64(binary_img)
+
+        # Compute metrics if ground truth provided
+        metrics = None
+        if gt_mask is not None and masks is not None:
+            import cv2
+            gt_bytes = await gt_mask.read()
+            gt_pil = Image.open(io.BytesIO(gt_bytes)).convert("L")
+            gt_np = np.array(gt_pil)
+            gt_binary = (gt_np > 0).astype(np.float32)
+
+            pred_binary = np.zeros((img_np.shape[0], img_np.shape[1]), dtype=np.float32)
+            for m in masks:
+                m_np = m.cpu().numpy() if isinstance(m, torch.Tensor) else m
+                if m_np.ndim == 3:
+                    m_np = m_np.squeeze(0)
+                if m_np.shape != pred_binary.shape:
+                    m_np = cv2.resize(m_np.astype(np.float32), (pred_binary.shape[1], pred_binary.shape[0]))
+                pred_binary = np.maximum(pred_binary, m_np)
+            pred_binary = (pred_binary > 0.5).astype(np.float32)
+
+            if gt_binary.shape != pred_binary.shape:
+                gt_binary = cv2.resize(gt_binary, (pred_binary.shape[1], pred_binary.shape[0]))
+
+            intersection = (pred_binary * gt_binary).sum()
+            union = ((pred_binary + gt_binary) > 0).sum()
+            iou = float(intersection / (union + 1e-8))
+            tp = float(intersection)
+            fp = float((pred_binary * (1 - gt_binary)).sum())
+            fn = float(((1 - pred_binary) * gt_binary).sum())
+            precision = tp / (tp + fp + 1e-8)
+            recall = tp / (tp + fn + 1e-8)
+            f1 = 2 * precision * recall / (precision + recall + 1e-8)
+
+            metrics = {
+                "iou": round(iou, 4),
+                "f1": round(f1, 4),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+            }
+
+        return JSONResponse({
+            "success": True,
+            "detections": len(boxes) if boxes is not None else 0,
+            "prompt_v1": prompt_v1,
+            "prompt_v2": prompt_v2,
+            "images": result_images,
+            "metrics": metrics,
+            "agents": {k: v for k, v in agent_results.items()},
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+    finally:
+        os.unlink(tmp_path)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 # ── Run ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
