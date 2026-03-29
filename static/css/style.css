@@ -121,8 +121,8 @@ body {
     border-bottom: 1px solid var(--border);
 }
 .header-content {
-    max-width: 1280px; margin: 0 auto;
-    padding: 14px 36px;
+    max-width: 100%; margin: 0 auto;
+    padding: 14px 32px;
     display: flex; justify-content: space-between; align-items: center;
 }
 .logo { display: flex; align-items: center; gap: 14px; }
@@ -210,8 +210,8 @@ body {
 
 /* ── Container ───────────────────────────────────── */
 .container {
-    max-width: 1280px; margin: 0 auto;
-    padding: 28px 36px;
+    max-width: 100%; margin: 0 auto;
+    padding: 24px 32px;
     position: relative; z-index: 1;
 }
 
