@@ -19,7 +19,7 @@ Two versions available:
 
 ```python
 !pip install -q gradio torch torchvision transformers accelerate bitsandbytes
-!pip install -q streamlit pyngrok
+!pip install -q streamlit pyngrok addict yapf
 ```
 
 ### Cell 3 — Build GroundingDINO & SAM
