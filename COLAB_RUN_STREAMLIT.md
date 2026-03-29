@@ -25,8 +25,11 @@ Two versions available:
 ### Cell 3 — Build GroundingDINO & SAM
 
 ```python
-!cd GroundingDINO && pip install -e . -q
-!cd segment_anything && pip install -e . -q
+%cd /content/mavr-ood/GroundingDINO
+!pip install -e . -q
+%cd /content/mavr-ood/segment_anything
+!pip install -e . -q
+%cd /content/mavr-ood
 !pip install git+https://github.com/openai/CLIP.git -q
 ```
 
