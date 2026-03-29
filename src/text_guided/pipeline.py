@@ -67,6 +67,21 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         print("[OK] Using pre-computed attribute matching (LLaVA already ran)")
     else:
         attr_result = attribute_matching_agent(image_path, scene_result, user_prompt)
+    # ---- Step 2.5: LLaVA Query Parsing (while LLaVA is still loaded) ----
+    parsed = llava_parse_query(user_prompt)
+    parsed['attr_agent_result'] = attr_result
+
+    # If agent recommended a better prompt, use it (but validate it)
+    if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
+        agent_prompt = attr_result['recommended_prompt'].strip()
+        # Reject if it looks like template text (LLaVA sometimes copies the template)
+        bad_keywords = ['groundingdino', 'optimized', 'detection prompt', 'example', 'template']
+        is_template = any(kw in agent_prompt.lower() for kw in bad_keywords)
+        if agent_prompt and len(agent_prompt) > 2 and not is_template:
+            print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
+            parsed['object_prompt'] = agent_prompt
+        else:
+            print(f"[i] Agent prompt rejected (template text), using parsed: '{parsed['object_prompt']}'")
 
     # ---- FREE LLaVA from GPU to make room for detection models ----
     try:
@@ -84,22 +99,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         print(f"[WARN] Could not free LLaVA: {e}")
         gc.collect()
         torch.cuda.empty_cache()
-
-    # Parse query using LLaVA-based parser (falls back to rule-based)
-    parsed = llava_parse_query(user_prompt)
-    parsed['attr_agent_result'] = attr_result
-
-    # If agent recommended a better prompt, use it (but validate it)
-    if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
-        agent_prompt = attr_result['recommended_prompt'].strip()
-        # Reject if it looks like template text (LLaVA sometimes copies the template)
-        bad_keywords = ['groundingdino', 'optimized', 'detection prompt', 'example', 'template']
-        is_template = any(kw in agent_prompt.lower() for kw in bad_keywords)
-        if agent_prompt and len(agent_prompt) > 2 and not is_template:
-            print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
-            parsed['object_prompt'] = agent_prompt
-        else:
-            print(f"[i] Agent prompt rejected (template text), using parsed: '{parsed['object_prompt']}'")
 
     # ---- Step 3: Candidate Detection (GroundingDINO) ----
     print(f"[i] Running GroundingDINO with prompt: '{parsed['object_prompt']}'")

@@ -220,21 +220,6 @@ with tab1:
 
                     status1.update(label="Phase 1: LLaVA agents complete!", state="complete")
 
-                # Free LLaVA from GPU
-                try:
-                    import src.agents.vlm_backend as vlm_mod
-                    if hasattr(vlm_mod, '_model') and vlm_mod._model is not None:
-                        del vlm_mod._model
-                        vlm_mod._model = None
-                    if hasattr(vlm_mod, '_processor') and vlm_mod._processor is not None:
-                        del vlm_mod._processor
-                        vlm_mod._processor = None
-                    gc.collect()
-                    torch.cuda.empty_cache()
-                except Exception:
-                    gc.collect()
-                    torch.cuda.empty_cache()
-
                 # Phase 2: Detection pipeline
                 status2 = st.status("Phase 2: Running detection pipeline...", expanded=True)
                 with status2:
