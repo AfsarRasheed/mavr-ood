@@ -52,6 +52,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global exception handler — ALWAYS return JSON, never HTML
+from starlette.requests import Request
+from starlette.responses import JSONResponse as StarletteJSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return StarletteJSONResponse(
+        status_code=500,
+        content={"success": False, "error": str(exc)},
+    )
+
 # Serve static files
 static_dir = ROOT / "static"
 static_dir.mkdir(exist_ok=True)

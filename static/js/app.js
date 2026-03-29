@@ -107,7 +107,7 @@ async function runDetection() {
         formData.append('query', query);
 
         const response = await fetch('/api/detect', { method: 'POST', body: formData });
-        const data = await response.json();
+        const data = await safeJson(response);
         stopTimer();
         completeProgress();
 
@@ -137,7 +137,7 @@ async function runOodDetection() {
         if (gtFile) formData.append('gt_mask', gtFile);
 
         const response = await fetch('/api/ood_detect', { method: 'POST', body: formData });
-        const data = await response.json();
+        const data = await safeJson(response);
 
         if (data.success) {
             renderOodResults(data);
@@ -148,6 +148,19 @@ async function runOodDetection() {
         alert('OOD request failed: ' + err.message);
     } finally {
         setBtnLoading(btn, false, 'Run OOD Detection');
+    }
+}
+
+// ── Safe JSON Parse ─────────────────────────────────
+async function safeJson(response) {
+    const text = await response.text();
+    try {
+        return JSON.parse(text);
+    } catch {
+        // Server returned non-JSON (HTML error page)
+        const match = text.match(/<title>(.*?)<\/title>/i);
+        const hint = match ? match[1] : text.substring(0, 120);
+        throw new Error('Server error: ' + hint);
     }
 }
 
