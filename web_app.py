@@ -213,6 +213,146 @@ async def detect(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+# ── OOD Helper Functions (self-contained, no gradio dependency) ──
+
+import cv2
+import GroundingDINO.groundingdino.datasets.transforms as T
+from GroundingDINO.groundingdino.util.utils import get_phrases_from_posmap
+
+def _preprocess_image(image_pil):
+    """Preprocess image for GroundingDINO."""
+    transform = T.Compose([
+        T.RandomResize([800], max_size=1333),
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    image_tensor, _ = transform(image_pil, None)
+    return image_tensor
+
+
+def _get_grounding_output(model, image_tensor, caption, box_threshold=0.3, text_threshold=0.25):
+    """Run GroundingDINO detection."""
+    caption = caption.lower().strip()
+    if not caption.endswith("."):
+        caption += "."
+    device = next(model.parameters()).device
+    image_tensor = image_tensor.to(device)
+    with torch.no_grad():
+        outputs = model(image_tensor[None], captions=[caption])
+    logits = outputs["pred_logits"].cpu().sigmoid()[0]
+    boxes = outputs["pred_boxes"].cpu()[0]
+    filt_mask = logits.max(dim=1)[0] > box_threshold
+    logits_filt = logits[filt_mask]
+    boxes_filt = boxes[filt_mask]
+    tokenizer = model.tokenizer
+    tokenized = tokenizer(caption)
+    pred_phrases = []
+    scores = []
+    for logit, box in zip(logits_filt, boxes_filt):
+        pred_phrase = get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer)
+        score = logit.max().item()
+        pred_phrases.append(f"{pred_phrase}({score:.2f})")
+        scores.append(score)
+    return boxes_filt, pred_phrases, scores
+
+
+def _run_sam_segmentation(predictor, image_np, boxes):
+    """Run SAM segmentation on detected boxes."""
+    predictor.set_image(image_np)
+    H, W = image_np.shape[:2]
+    boxes_scaled = boxes.clone()
+    boxes_scaled[:, 0] *= W
+    boxes_scaled[:, 1] *= H
+    boxes_scaled[:, 2] *= W
+    boxes_scaled[:, 3] *= H
+    boxes_xyxy = torch.zeros_like(boxes_scaled)
+    boxes_xyxy[:, 0] = boxes_scaled[:, 0] - boxes_scaled[:, 2] / 2
+    boxes_xyxy[:, 1] = boxes_scaled[:, 1] - boxes_scaled[:, 3] / 2
+    boxes_xyxy[:, 2] = boxes_scaled[:, 0] + boxes_scaled[:, 2] / 2
+    boxes_xyxy[:, 3] = boxes_scaled[:, 1] + boxes_scaled[:, 3] / 2
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    transformed_boxes = predictor.transform.apply_boxes_torch(boxes_xyxy.to(device), (H, W))
+    masks, _, _ = predictor.predict_torch(
+        point_coords=None, point_labels=None,
+        boxes=transformed_boxes, multimask_output=False,
+    )
+    return masks.cpu(), boxes_xyxy
+
+
+def _create_detection_vis(image_np, boxes_xyxy, labels):
+    vis = image_np.copy()
+    for box, label in zip(boxes_xyxy, labels):
+        x1, y1, x2, y2 = box.int().numpy()
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
+        cv2.putText(vis, label, (x1, max(y1 - 10, 0)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    return vis
+
+
+def _create_mask_vis(image_np, masks):
+    vis = image_np.copy().astype(np.float32)
+    colors = [[255, 0, 100], [255, 165, 0], [0, 255, 255], [255, 255, 0], [128, 0, 255]]
+    for i, mask in enumerate(masks):
+        mask_np = mask.squeeze().numpy().astype(bool)
+        color = np.array(colors[i % len(colors)], dtype=np.float32)
+        vis[mask_np] = vis[mask_np] * 0.4 + color * 0.6
+    return vis.astype(np.uint8)
+
+
+def _create_binary_mask_vis(image_np, masks):
+    vis = image_np.copy().astype(np.float32)
+    combined = np.zeros(image_np.shape[:2], dtype=bool)
+    for mask in masks:
+        combined |= mask.squeeze().numpy().astype(bool)
+    pink = np.array([255, 105, 180], dtype=np.float32)
+    vis[combined] = vis[combined] * 0.35 + pink * 0.65
+    return vis.astype(np.uint8)
+
+
+def _run_agents_on_image(image_path):
+    """Run all 5 OOD agents."""
+    results = {}
+    try:
+        from src.agents.agent1 import SceneContextAnalyzer
+        results["agent1"] = SceneContextAnalyzer().analyze_image(image_path)
+    except Exception as e:
+        results["agent1"] = {"error": str(e)}
+    try:
+        from src.agents.agent2 import SpatialAnomalyDetector
+        results["agent2"] = SpatialAnomalyDetector().analyze_image(image_path)
+    except Exception as e:
+        results["agent2"] = {"error": str(e)}
+    try:
+        from src.agents.agent3 import SemanticInconsistencyAnalyzer
+        results["agent3"] = SemanticInconsistencyAnalyzer().analyze_image(image_path)
+    except Exception as e:
+        results["agent3"] = {"error": str(e)}
+    try:
+        from src.agents.agent4 import VisualAppearanceEvaluator
+        results["agent4"] = VisualAppearanceEvaluator().analyze_image(image_path)
+    except Exception as e:
+        results["agent4"] = {"error": str(e)}
+    try:
+        from src.agents.agent5 import ReasoningSynthesizer
+        combined = {
+            "agent1_scene_context": results.get("agent1", {}),
+            "agent2_spatial_anomaly": results.get("agent2", {}),
+            "agent3_semantic_inconsistency": results.get("agent3", {}),
+            "agent4_visual_appearance": results.get("agent4", {}),
+        }
+        results["agent5"] = ReasoningSynthesizer().synthesize_analysis(combined)
+    except Exception as e:
+        results["agent5"] = {"error": str(e)}
+    return results
+
+
+def _extract_prompts(agent_results):
+    a5 = agent_results.get("agent5", {})
+    prompts = a5.get("grounded_sam_prompts", {})
+    prompt_v1 = prompts.get("prompt_v1", a5.get("detailed_prompt", "unusual object on road"))
+    prompt_v2 = prompts.get("prompt_v2", a5.get("simple_prompt", "anomaly"))
+    return prompt_v1, prompt_v2
+
 
 # ── OOD Detection Endpoint ───────────────────────────────────
 @app.post("/api/ood_detect")
@@ -233,17 +373,9 @@ async def ood_detect(
     tmp_path = tmp.name
 
     try:
-        from app import (
-            run_agents_on_image, extract_prompts,
-            preprocess_image, get_grounding_output,
-            run_sam_segmentation,
-            create_detection_visualization, create_mask_visualization,
-            create_binary_mask_visualization,
-        )
-
         # Stage 1: Run 5 LLaVA agents
-        agent_results = run_agents_on_image(tmp_path)
-        prompt_v1, prompt_v2 = extract_prompts(agent_results)
+        agent_results = _run_agents_on_image(tmp_path)
+        prompt_v1, prompt_v2 = _extract_prompts(agent_results)
 
         # Free LLaVA from GPU
         try:
@@ -259,14 +391,14 @@ async def ood_detect(
 
         # Stage 2: GroundingDINO detection
         gdino = models['gdino']
-        image_tensor = preprocess_image(img_pil)
-        boxes, labels, scores = get_grounding_output(
+        image_tensor = _preprocess_image(img_pil)
+        boxes, labels, scores = _get_grounding_output(
             gdino, image_tensor, prompt_v1,
             box_threshold=0.35, text_threshold=0.25
         )
 
         if len(boxes) == 0 and prompt_v2 != prompt_v1:
-            boxes, labels, scores = get_grounding_output(
+            boxes, labels, scores = _get_grounding_output(
                 gdino, image_tensor, prompt_v2,
                 box_threshold=0.35, text_threshold=0.25
             )
@@ -299,23 +431,18 @@ async def ood_detect(
         masks = None
         boxes_xyxy = None
         if len(boxes) > 0:
-            predictor = models['sam']
-            masks, boxes_xyxy = run_sam_segmentation(predictor, img_np, boxes)
+            masks, boxes_xyxy = _run_sam_segmentation(models['sam'], img_np, boxes)
 
         # Generate visualizations
         result_images = {}
         if masks is not None and boxes_xyxy is not None:
-            det_img = create_detection_visualization(img_np, boxes_xyxy, labels)
-            mask_img = create_mask_visualization(img_np, masks)
-            binary_img = create_binary_mask_visualization(img_np, masks)
-            result_images['detection'] = img_to_b64(det_img)
-            result_images['masks'] = img_to_b64(mask_img)
-            result_images['binary_mask'] = img_to_b64(binary_img)
+            result_images['detection'] = img_to_b64(_create_detection_vis(img_np, boxes_xyxy, labels))
+            result_images['masks'] = img_to_b64(_create_mask_vis(img_np, masks))
+            result_images['binary_mask'] = img_to_b64(_create_binary_mask_vis(img_np, masks))
 
         # Compute metrics if ground truth provided
         metrics = None
         if gt_mask is not None and masks is not None:
-            import cv2
             gt_bytes = await gt_mask.read()
             gt_pil = Image.open(io.BytesIO(gt_bytes)).convert("L")
             gt_np = np.array(gt_pil)
@@ -377,3 +504,4 @@ async def ood_detect(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8501)
+
