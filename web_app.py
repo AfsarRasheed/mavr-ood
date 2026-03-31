@@ -189,7 +189,7 @@ async def detect(
                 "object_prompt": parsed.get('object_prompt', query),
                 "spatial": parsed.get('spatial'),
                 "attribute": parsed.get('attribute'),
-                "parser_mode": parsed.get('parser_mode', 'rule-based'),
+                "parser_mode": parsed.get('parser_mode', 'structured rules'),
                 "anchor": parsed.get('anchor'),
             },
             "step_images": step_images_b64,
@@ -504,4 +504,3 @@ async def ood_detect(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8501)
-

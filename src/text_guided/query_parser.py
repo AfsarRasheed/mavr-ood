@@ -148,6 +148,7 @@ def parse_query(user_prompt):
         "spatial": spatial,
         "detect_all": detect_all,
         "anchor": anchor,  # NEW: reference object for relational queries
+        "parser_mode": "structured rules",
     }
 
     anchor_info = f", anchor='{anchor}'" if anchor else ""

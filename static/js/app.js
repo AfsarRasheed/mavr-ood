@@ -234,7 +234,7 @@ function renderResults(data) {
 
     // Metrics
     document.getElementById('metricTime').textContent = data.time + 's';
-    document.getElementById('metricParser').textContent = data.parsed?.parser_mode || 'rule-based';
+    document.getElementById('metricParser').textContent = data.parsed?.parser_mode || 'structured rules';
     document.getElementById('metricSpatial').textContent = data.parsed?.spatial || 'none';
     document.getElementById('metricObject').textContent = data.parsed?.object_prompt || data.query;
 
@@ -312,21 +312,149 @@ function renderOodResults(data) {
     // Agent analysis
     const agentGrid = document.getElementById('agentCardsGrid');
     agentGrid.innerHTML = '';
+    const agentNames = {
+        'agent1': 'Scene Context',
+        'agent2': 'Spatial Anomaly',
+        'agent3': 'Semantic Analysis',
+        'agent4': 'Visual Appearance',
+        'agent5': 'Reasoning Synthesis',
+    };
     if (data.agents) {
         Object.entries(data.agents).forEach(([key, val]) => {
             const card = document.createElement('div');
             card.className = 'agent-card';
-            const title = key.replace('agent', 'Agent ');
-            const body = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+            const title = agentNames[key] || key.replace('agent', 'Agent ');
+            const body = summarizeAgentCard(key, val);
             card.innerHTML = `
                 <div class="agent-card-header">${title}</div>
-                <div class="agent-card-body"><pre style="white-space:pre-wrap;margin:0;font-size:11px">${body}</pre></div>
+                <div class="agent-card-body">${body}</div>
             `;
             agentGrid.appendChild(card);
         });
     }
 
     section.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Format Agent Output ─────────────────────────────
+function summarizeAgentCard(agentKey, val) {
+    if (!val || typeof val !== 'object') return escapeHtml(String(val || 'No output'));
+    if (val.error) return `<span style="color:var(--danger)">Error: ${escapeHtml(val.error)}</span>`;
+
+    switch (agentKey) {
+        case 'agent1':
+            return summarizeSceneAgent(val);
+        case 'agent2':
+            return summarizeSpatialAgent(val);
+        case 'agent3':
+            return summarizeSemanticAgent(val);
+        case 'agent4':
+            return summarizeVisualAgent(val);
+        case 'agent5':
+            return summarizeSynthesisAgent(val);
+        default:
+            return summarizeGenericObject(val);
+    }
+}
+
+function summarizeSceneAgent(val) {
+    const scene = val.scene_analysis || {};
+    const env = scene.environmental_conditions || {};
+    const baseline = val.contextual_baseline || {};
+    return [
+        renderLine('Scene', scene.scene_type),
+        renderLine('Road', scene.road_infrastructure),
+        renderLine('Weather', env.weather),
+        renderLine('Lighting', env.lighting),
+        renderLine('Expected Objects', formatList(baseline.expected_objects)),
+        renderLine('Typical Layout', baseline.typical_layout),
+        renderLine('Confidence', formatConfidence(val.context_confidence)),
+    ].filter(Boolean).join('');
+}
+
+function summarizeSpatialAgent(val) {
+    return [
+        renderLine('Objects on Road', val.objects_on_road),
+        renderLine('Positioning Issues', val.positioning_violations),
+        renderLine('Traffic Disruption', val.traffic_disruptions),
+        renderLine('Safety Hazards', val.safety_hazards),
+        renderLine('Confidence', formatConfidence(val.spatial_confidence)),
+    ].filter(Boolean).join('');
+}
+
+function summarizeSemanticAgent(val) {
+    return [
+        renderLine('Detected Objects', val.detected_objects),
+        renderLine('OOD Objects', val.inappropriate_objects),
+        renderLine('Domain Violations', val.domain_violations),
+        renderLine('Safety Hazards', val.safety_hazards),
+        renderLine('Assessment', val.overall_assessment),
+        renderLine('Primary Concerns', val.primary_concerns),
+        renderLine('Confidence', formatConfidence(val.semantic_confidence)),
+    ].filter(Boolean).join('');
+}
+
+function summarizeVisualAgent(val) {
+    return [
+        renderLine('Lighting', val.lighting_conditions),
+        renderLine('Most Unusual', val.most_unusual_object),
+        renderLine('Color Anomalies', val.color_anomalies),
+        renderLine('Texture Issues', val.texture_irregularities),
+        renderLine('Shape Issues', val.shape_deformations),
+        renderLine('Overall Condition', val.overall_condition),
+        renderLine('Confidence', formatConfidence(val.visual_confidence)),
+    ].filter(Boolean).join('');
+}
+
+function summarizeSynthesisAgent(val) {
+    const prompts = val.grounded_sam_prompts || {};
+    return [
+        renderLine('Prompt V1', prompts.prompt_v1),
+        renderLine('Prompt V2', prompts.prompt_v2),
+        renderLine('Anomaly Type', val.anomaly_type),
+        renderLine('Reasoning', val.reasoning),
+        renderLine('Confidence', formatConfidence(val.overall_confidence)),
+    ].filter(Boolean).join('');
+}
+
+function summarizeGenericObject(val) {
+    return Object.entries(val)
+        .filter(([k, v]) => !['raw_response', 'raw_text', 'error'].includes(k) && v !== null && v !== undefined)
+        .slice(0, 8)
+        .map(([k, v]) => renderLine(k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), formatValue(v)))
+        .join('') || '<span style="color:var(--text-muted)">No analysis data</span>';
+}
+
+function renderLine(label, value) {
+    if (!value) return '';
+    return `<p><strong style="color:var(--text)">${escapeHtml(label)}:</strong> <span style="color:var(--text-secondary)">${value}</span></p>`;
+}
+
+function formatList(value) {
+    if (!Array.isArray(value) || value.length === 0) return '';
+    return escapeHtml(value.join(', '));
+}
+
+function formatConfidence(value) {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'number') return `${(value * 100).toFixed(0)}%`;
+    return escapeHtml(String(value));
+}
+
+function formatValue(value) {
+    if (value === null || value === undefined) return '';
+    if (Array.isArray(value)) return escapeHtml(value.join(', '));
+    if (typeof value === 'object') return escapeHtml(JSON.stringify(value));
+    return escapeHtml(String(value));
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function setOodMetric(valueId, barId, value) {
