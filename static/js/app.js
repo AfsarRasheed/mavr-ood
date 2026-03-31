@@ -251,6 +251,7 @@ function renderResults(data) {
         tabsContainer.appendChild(btn);
     });
     if (keys.length > 0) showStep(keys[0], tabsContainer.querySelector('.step-tab'));
+    renderStepGallery(keys);
 
     // Reasoning
     document.getElementById('reasoningText').textContent = data.reasoning || 'No reasoning output.';
@@ -277,6 +278,38 @@ function showStep(key, tab) {
 }
 
 // ── Render OOD Results ──────────────────────────────
+function renderStepGallery(keys) {
+    const grid = document.getElementById('stepsGalleryGrid');
+    if (!grid) return;
+
+    grid.innerHTML = '';
+    keys.forEach((key) => {
+        if (!stepImages[key]) return;
+
+        const card = document.createElement('div');
+        card.className = 'step-gallery-card';
+        card.innerHTML = `
+            <div class="step-gallery-image-wrap">
+                <img class="step-gallery-image" src="data:image/jpeg;base64,${stepImages[key]}" alt="${formatGalleryStepName(key)}">
+            </div>
+            <div class="step-gallery-title">${formatGalleryStepName(key)}</div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function formatGalleryStepName(key) {
+    const labels = {
+        step1_scene: 'Step 1: Scene Understanding (LLaVA)',
+        step2_query: 'Step 2: Attribute Matching (LLaVA)',
+        step3_candidates: 'Step 3: Candidates (GroundingDINO)',
+        step4_clip: 'Step 4: CLIP Verification',
+        step5_spatial: 'Step 5: Spatial Selection',
+        step6_final: 'Step 6: Final Segmentation (SAM)',
+    };
+    return labels[key] || formatStepName(key);
+}
+
 function renderOodResults(data) {
     const section = document.getElementById('oodResults');
     section.style.display = 'block';
