@@ -233,7 +233,7 @@ async def ood_detect(
     tmp_path = tmp.name
 
     try:
-        from src.model_loader import (
+        from app import (
             run_agents_on_image, extract_prompts,
             preprocess_image, get_grounding_output,
             run_sam_segmentation,
