@@ -179,3 +179,17 @@ def run_vlm(messages, image_path=None):
     torch.cuda.empty_cache()
 
     return response.strip()
+
+
+def ask_vlm_text_only(prompt, system_prompt=""):
+    """
+    Convenience wrapper for text-only prompting.
+
+    Used by lightweight helpers like the advanced query parser so they can
+    reuse the same singleton LLaVA instance without loading a separate stack.
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    return run_vlm(messages, image_path=None)

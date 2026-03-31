@@ -2,9 +2,15 @@
 Query Parser and Spatial Filter
 Parses user text prompts into structured components and filters
 bounding boxes by spatial terms.
+
+Supports two modes:
+1. Structured rules parsing (fast, reliable fallback)
+2. LLaVA-assisted parsing (advanced natural language understanding)
 """
 
 import math
+import re
+import json
 import numpy as np
 import torch
 
@@ -156,7 +162,130 @@ def parse_query(user_prompt):
     return result
 
 
-def spatial_filter(boxes_xyxy, spatial_term, image_shape=None, anchor_boxes=None):
+def llava_parse_query(user_prompt, image_path=None):
+    """
+    Advanced query parser using LLaVA to understand more natural language
+    than the rule parser can safely cover.
+
+    Falls back to the structured rules parser if the LLaVA response is not
+    usable, so the UI keeps working even when the VLM parse is imperfect.
+    """
+    print(f"[i] LLaVA Query Parser: parsing '{user_prompt}'...")
+
+    parse_prompt = f"""You are a query parser for an object detection system.
+Given the user's search query, extract structured information as JSON.
+
+User query: "{user_prompt}"
+
+Return ONLY valid JSON with these fields:
+{{
+  "object": "main object to detect (e.g. car, truck, pedestrian)",
+  "color": "color if mentioned, else null",
+  "spatial": "spatial relationship: left/right/center/between/ahead/behind/above/below/nearest/farthest/largest/smallest/next_to/in_front, else null",
+  "anchor": "reference object if relational query (e.g. 'next to the truck' -> 'truck'), else null",
+  "anchor2": "second reference object if between query (e.g. 'between truck and bus' -> 'bus'), else null",
+  "ordinal": "ordinal position if mentioned (e.g. 'second from right' -> 2), else null",
+  "ordinal_direction": "direction for ordinal: 'left'/'right', else null",
+  "attribute": "other descriptors (parked, damaged, moving, large, small), else null",
+  "detection_prompt": "short phrase for object detector (combine object + color + attribute)"
+}}
+
+Examples:
+- "the red car on the left" -> {{"object": "car", "color": "red", "spatial": "left", "anchor": null, "anchor2": null, "ordinal": null, "ordinal_direction": null, "attribute": null, "detection_prompt": "red car"}}
+- "the truck between the car and the bus" -> {{"object": "truck", "color": null, "spatial": "between", "anchor": "car", "anchor2": "bus", "ordinal": null, "ordinal_direction": null, "attribute": null, "detection_prompt": "truck"}}
+- "the second vehicle from the right" -> {{"object": "vehicle", "color": null, "spatial": "right", "anchor": null, "anchor2": null, "ordinal": 2, "ordinal_direction": "right", "attribute": null, "detection_prompt": "vehicle"}}
+- "the damaged car near the traffic signal" -> {{"object": "car", "color": null, "spatial": "next_to", "anchor": "traffic signal", "anchor2": null, "ordinal": null, "ordinal_direction": null, "attribute": "damaged", "detection_prompt": "damaged car"}}
+
+Return ONLY the JSON, nothing else."""
+
+    try:
+        from src.agents.vlm_backend import ask_vlm_text_only
+
+        raw = ask_vlm_text_only(parse_prompt)
+        text = raw.strip()
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+
+        parsed_llm = json.loads(text)
+
+        spatial_map = {
+            "left": "left",
+            "right": "right",
+            "center": "center",
+            "middle": "center",
+            "top": "top",
+            "bottom": "bottom",
+            "largest": "largest",
+            "smallest": "smallest",
+            "nearest": "nearest",
+            "closest": "nearest",
+            "farthest": "farthest",
+            "between": "between",
+            "ahead": "ahead",
+            "behind": "behind",
+            "above": "above",
+            "below": "below",
+            "next_to": "next_to",
+            "next to": "next_to",
+            "near": "next_to",
+            "in front": "in_front",
+            "in_front": "in_front",
+        }
+
+        llm_spatial = parsed_llm.get("spatial")
+        spatial = spatial_map.get(llm_spatial, llm_spatial) if llm_spatial else None
+
+        detection_prompt = (parsed_llm.get("detection_prompt") or "").strip()
+        if not detection_prompt:
+            parts = []
+            if parsed_llm.get("color"):
+                parts.append(parsed_llm["color"])
+            if parsed_llm.get("attribute"):
+                parts.append(parsed_llm["attribute"])
+            if parsed_llm.get("object"):
+                parts.append(parsed_llm["object"])
+            detection_prompt = " ".join(parts) if parts else user_prompt
+
+        ordinal = parsed_llm.get("ordinal")
+        if ordinal is not None:
+            try:
+                ordinal = int(ordinal)
+            except (TypeError, ValueError):
+                ordinal = None
+
+        result = {
+            "original": user_prompt,
+            "object_prompt": detection_prompt,
+            "attribute": parsed_llm.get("color") or parsed_llm.get("attribute"),
+            "spatial": spatial,
+            "detect_all": spatial is None,
+            "anchor": parsed_llm.get("anchor"),
+            "anchor2": parsed_llm.get("anchor2"),
+            "ordinal": ordinal,
+            "ordinal_direction": parsed_llm.get("ordinal_direction"),
+            "parser_mode": "llava-assisted",
+        }
+
+        anchor_info = f", anchor='{result['anchor']}'" if result.get("anchor") else ""
+        anchor2_info = f", anchor2='{result['anchor2']}'" if result.get("anchor2") else ""
+        ordinal_info = f", ordinal={ordinal}" if ordinal else ""
+        print(
+            f"[OK] LLaVA parsed: object='{detection_prompt}', spatial={spatial}"
+            f"{anchor_info}{anchor2_info}{ordinal_info}"
+        )
+        return result
+
+    except Exception as e:
+        print(f"[WARN] LLaVA parser failed ({e}), falling back to structured rules")
+        result = parse_query(user_prompt)
+        result["parser_mode"] = "structured rules (fallback)"
+        return result
+
+
+def spatial_filter(boxes_xyxy, spatial_term, image_shape=None, anchor_boxes=None,
+                   anchor2_boxes=None, ordinal=None, ordinal_direction=None):
     """
     Filter bounding boxes by spatial term.
 
@@ -246,5 +375,23 @@ def spatial_filter(boxes_xyxy, spatial_term, image_shape=None, anchor_boxes=None
         return int(np.argmax(y_centers))
     elif spatial_term == "farthest":
         return int(np.argmin(y_centers))
+    elif spatial_term == "between" and anchor_boxes is not None and anchor2_boxes is not None:
+        anchor1 = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
+        anchor2 = anchor2_boxes.numpy() if torch.is_tensor(anchor2_boxes) else np.array(anchor2_boxes)
+        if len(anchor1) > 0 and len(anchor2) > 0:
+            mid_x = ((anchor1[0, 0] + anchor1[0, 2]) / 2 + (anchor2[0, 0] + anchor2[0, 2]) / 2) / 2
+            mid_y = ((anchor1[0, 1] + anchor1[0, 3]) / 2 + (anchor2[0, 1] + anchor2[0, 3]) / 2) / 2
+            distances = np.sqrt((x_centers - mid_x) ** 2 + (y_centers - mid_y) ** 2)
+            return int(np.argmin(distances))
+        return 0
+    elif spatial_term == "ahead":
+        return int(np.argmax(y_centers))
+    elif spatial_term in ("left", "right") and ordinal is not None and ordinal > 0:
+        if spatial_term == "left":
+            sorted_indices = np.argsort(x_centers)
+        else:
+            sorted_indices = np.argsort(x_centers)[::-1]
+        idx = min(ordinal - 1, len(sorted_indices) - 1)
+        return int(sorted_indices[idx])
     else:
         return 0

@@ -11,7 +11,7 @@ import torch
 
 from src.text_guided.scene_agent import scene_understanding
 from src.text_guided.attribute_agent import attribute_matching_agent
-from src.text_guided.query_parser import parse_query, spatial_filter
+from src.text_guided.query_parser import parse_query, llava_parse_query, spatial_filter
 from src.text_guided.visualizer import generate_step_visualizations
 from src.text_guided.reasoning_agent import reasoning_agent
 
@@ -68,6 +68,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     else:
         attr_result = attribute_matching_agent(image_path, scene_result, user_prompt)
 
+    # ---- Step 2.5: Advanced Query Parsing while LLaVA is still loaded ----
+    parsed = llava_parse_query(user_prompt)
+    parsed['attr_agent_result'] = attr_result
+
     # ---- FREE LLaVA from GPU to make room for detection models ----
     try:
         import src.agents.vlm_backend as vlm_mod
@@ -84,10 +88,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         print(f"[WARN] Could not free LLaVA: {e}")
         gc.collect()
         torch.cuda.empty_cache()
-
-    # Parse query (internal helper)
-    parsed = parse_query(user_prompt)
-    parsed['attr_agent_result'] = attr_result
 
     # If agent recommended a better prompt, use it (but validate it)
     if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
@@ -233,7 +233,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     anchor_boxes = None
 
     # Detect anchor (reference) object if relational query
-    if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below'):
+    if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below', 'between'):
         print(f"[i] Detecting anchor object: '{parsed['anchor']}'...")
         try:
             anchor_caption = parsed['anchor'].lower().strip()
@@ -260,10 +260,46 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         except Exception as e:
             print(f"[WARN] Anchor detection failed: {e}")
 
+    # Detect second anchor for "between" queries
+    anchor2_boxes = None
+    if parsed.get('anchor2') and parsed.get('spatial') == 'between':
+        print(f"[i] Detecting second anchor object: '{parsed['anchor2']}'...")
+        try:
+            anchor2_caption = parsed['anchor2'].lower().strip()
+            if not anchor2_caption.endswith("."):
+                anchor2_caption += "."
+            with torch.no_grad():
+                anchor2_outputs = gdino_model(image_tensor_dev[None], captions=[anchor2_caption])
+            anchor2_logits = anchor2_outputs["pred_logits"].cpu().sigmoid()[0]
+            anchor2_boxes_raw = anchor2_outputs["pred_boxes"].cpu()[0]
+            anchor2_filt = anchor2_logits.max(dim=1)[0] > 0.25
+            anchor2_boxes_cxcywh = anchor2_boxes_raw[anchor2_filt]
+
+            if len(anchor2_boxes_cxcywh) > 0:
+                anchor2_xyxy = torch.zeros_like(anchor2_boxes_cxcywh)
+                anchor2_xyxy[:, 0] = (anchor2_boxes_cxcywh[:, 0] - anchor2_boxes_cxcywh[:, 2] / 2) * W
+                anchor2_xyxy[:, 1] = (anchor2_boxes_cxcywh[:, 1] - anchor2_boxes_cxcywh[:, 3] / 2) * H
+                anchor2_xyxy[:, 2] = (anchor2_boxes_cxcywh[:, 0] + anchor2_boxes_cxcywh[:, 2] / 2) * W
+                anchor2_xyxy[:, 3] = (anchor2_boxes_cxcywh[:, 1] + anchor2_boxes_cxcywh[:, 3] / 2) * H
+                anchor2_boxes = anchor2_xyxy
+                print(f"[OK] Found {len(anchor2_boxes)} second anchor(s): '{parsed['anchor2']}'")
+            else:
+                print(f"[WARN] Second anchor '{parsed['anchor2']}' not found")
+        except Exception as e:
+            print(f"[WARN] Second anchor detection failed: {e}")
+
     if len(passed_indices) > 0:
         if parsed['spatial'] and not parsed['detect_all']:
             passed_boxes = all_boxes_xyxy[passed_indices]
-            local_idx = spatial_filter(passed_boxes, parsed['spatial'], image_shape=(H, W), anchor_boxes=anchor_boxes)
+            local_idx = spatial_filter(
+                passed_boxes,
+                parsed['spatial'],
+                image_shape=(H, W),
+                anchor_boxes=anchor_boxes,
+                anchor2_boxes=anchor2_boxes,
+                ordinal=parsed.get('ordinal'),
+                ordinal_direction=parsed.get('ordinal_direction'),
+            )
             if local_idx is not None:
                 selected_idx = passed_indices[local_idx]
                 print(f"[OK] Spatial filter '{parsed['spatial']}' selected candidate #{selected_idx+1}")
