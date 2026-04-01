@@ -547,54 +547,6 @@ body {
 .comp-label-left { left: 14px; color: var(--text-secondary); }
 .comp-label-right { right: 14px; color: var(--primary); }
 
-/* Metrics Cards */
-.metrics-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px; margin-bottom: 28px;
-}
-.metric-card {
-    text-align: center; padding: 24px 16px;
-    position: relative; overflow: hidden;
-}
-.metric-card::before {
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0;
-    height: 4px; border-radius: 0 0 2px 2px;
-}
-.metric-card:nth-child(1)::before { background: var(--gradient-primary); }
-.metric-card:nth-child(2)::before { background: var(--gradient-secondary); }
-.metric-card:nth-child(3)::before { background: var(--gradient-cool); }
-.metric-card:nth-child(4)::before { background: linear-gradient(135deg, var(--warning), var(--primary)); }
-
-.metric-icon {
-    width: 40px; height: 40px;
-    margin: 0 auto 12px;
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-}
-.metric-card:nth-child(1) .metric-icon { background: rgba(255,107,53,0.08); color: var(--primary); }
-.metric-card:nth-child(2) .metric-icon { background: rgba(0,200,150,0.08); color: var(--secondary); }
-.metric-card:nth-child(3) .metric-icon { background: rgba(79,70,229,0.08); color: var(--tertiary); }
-.metric-card:nth-child(4) .metric-icon { background: rgba(245,158,11,0.08); color: var(--warning); }
-
-.metric-value {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 24px; font-weight: 800;
-    margin-bottom: 4px;
-    letter-spacing: -0.3px;
-}
-.metric-card:nth-child(1) .metric-value { color: var(--primary); }
-.metric-card:nth-child(2) .metric-value { color: var(--secondary); }
-.metric-card:nth-child(3) .metric-value { color: var(--tertiary); }
-.metric-card:nth-child(4) .metric-value { color: var(--warning); }
-
-.metric-label {
-    font-size: 10px; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: 1.5px;
-    font-weight: 700;
-}
-
 /* Steps Viewer */
 .steps-viewer { margin-bottom: 28px; }
 
@@ -942,7 +894,7 @@ body {
 @media (max-width: 900px) {
     .container { padding: 16px; }
     .input-section, .ood-input-section { grid-template-columns: 1fr; }
-    .metrics-row, .ood-metrics-row { grid-template-columns: repeat(2, 1fr); }
+    .ood-metrics-row { grid-template-columns: repeat(2, 1fr); }
     .ood-results-grid { grid-template-columns: 1fr 1fr; }
     .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr 1fr; }
@@ -956,7 +908,7 @@ body {
     .query-input-wrapper { flex-direction: column; }
 }
 @media (max-width: 480px) {
-    .metrics-row, .ood-metrics-row { grid-template-columns: 1fr; }
+    .ood-metrics-row { grid-template-columns: 1fr; }
     .ood-results-grid { grid-template-columns: 1fr; }
     .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr; }

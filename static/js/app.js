@@ -251,12 +251,6 @@ function renderResults(data) {
     document.getElementById('compOverlay').style.clipPath = 'inset(0 0 0 50%)';
     document.getElementById('compHandle').style.left = '50%';
 
-    // Metrics
-    document.getElementById('metricTime').textContent = data.time + 's';
-    document.getElementById('metricParser').textContent = data.parsed?.parser_mode || 'structured rules';
-    document.getElementById('metricSpatial').textContent = data.parsed?.spatial || 'none';
-    document.getElementById('metricObject').textContent = data.parsed?.object_prompt || data.query;
-
     // Steps
     stepImages = data.step_images || {};
     const tabsContainer = document.getElementById('stepTabs');
