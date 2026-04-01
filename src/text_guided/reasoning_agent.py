@@ -46,6 +46,10 @@ def reasoning_agent(pipeline_data):
     clip_details = pipeline_data.get("clip_details", "")
     spatial_term = pipeline_data.get("spatial_term", "none")
     n_selected = pipeline_data.get("n_selected", 0)
+    match_state = pipeline_data.get("match_state", "unknown")
+    match_confidence = pipeline_data.get("match_confidence", 0.0)
+    priority_order = pipeline_data.get("priority_order", [])
+    top_candidates = pipeline_data.get("top_candidates", [])
 
     context = f"""A multi-agent vision-language detection pipeline processed a road scene image with the following results:
 
@@ -54,7 +58,9 @@ Scene Analysis: {scene_type} scene, {lighting} lighting, {n_objects} objects ide
 Attribute Matching: {reasoning}. Ambiguity level: {ambiguity}. Detection prompt refined to: "{rec_prompt}".
 Object Detection: GroundingDINO detected {n_candidates} candidate region(s) matching the prompt.
 Semantic Verification: CLIP verified {n_verified} candidate(s), rejected {n_rejected}. {clip_details}
-Spatial Selection: Spatial filter '{spatial_term}' applied, {n_selected} object(s) selected.
+Constraint Priority: {priority_order}
+Candidate Ranking: final decision state = {match_state}, confidence = {match_confidence:.3f}, top candidates = {top_candidates}
+Spatial Selection: Spatial filter '{spatial_term}' considered during ranking, {n_selected} object(s) selected.
 Segmentation: SAM generated pixel-precise segmentation mask for the selected object."""
 
     prompt = f"""{context}
@@ -64,6 +70,7 @@ Based on the above pipeline results, write a clear reasoning paragraph that expl
 2. How it identified the target object from the user's query
 3. Why certain candidates were accepted or rejected
 4. How the final object was selected and how confident the decision is
+5. Whether the outcome should be understood as an exact match, closest match, ambiguous match, or no reliable match
 
 Write as a single cohesive paragraph. Be specific and reference the actual numbers. Do not use bullet points."""
 
@@ -116,4 +123,8 @@ def _fallback_reasoning(data):
             f"The spatial filter '{spatial}' selected "
             f"{data.get('n_selected', 0)} object(s) as the final detection."
         )
+    parts.append(
+        f"The final decision state was {data.get('match_state', 'unknown')} "
+        f"with confidence {data.get('match_confidence', 0.0):.3f}."
+    )
     return " ".join(parts)

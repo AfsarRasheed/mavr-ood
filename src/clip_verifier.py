@@ -13,7 +13,7 @@ import torch
 import clip
 import numpy as np
 from PIL import Image
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 
 class CLIPVerifier:
@@ -66,6 +66,99 @@ class CLIPVerifier:
         # Cosine similarity
         similarity = (image_features @ text_features.T).item()
         return similarity
+
+    @torch.no_grad()
+    def compare_prompts(self, image_crop: Image.Image, text_prompts: List[str]) -> Dict[str, float]:
+        """
+        Compare one crop against multiple prompt variants in a single CLIP pass.
+
+        Args:
+            image_crop: PIL Image of the cropped detection region
+            text_prompts: prompt variants to score
+
+        Returns:
+            dict mapping prompt -> cosine similarity
+        """
+        prompts = [prompt for prompt in text_prompts if prompt and prompt.strip()]
+        if not prompts:
+            return {}
+
+        image_input = self.preprocess(image_crop).unsqueeze(0).to(self.device)
+        image_features = self.model.encode_image(image_input)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+        text_input = clip.tokenize(prompts).to(self.device)
+        text_features = self.model.encode_text(text_input)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+        similarities = (image_features @ text_features.T).squeeze(0).tolist()
+        if isinstance(similarities, float):
+            similarities = [similarities]
+
+        return {prompt: float(score) for prompt, score in zip(prompts, similarities)}
+
+    def compute_discriminative_scores(self, image_crop: Image.Image, query_info: dict) -> Dict[str, float]:
+        """
+        Score a crop against positive and contrastive prompts derived from the query.
+
+        Returns a compact score dictionary used by the natural-language grounding
+        ranker in the text-guided pipeline.
+        """
+        target_object = (query_info.get("target_object") or query_info.get("object_prompt") or "object").strip()
+        attrs = query_info.get("attributes") or {}
+        color = attrs.get("color")
+        condition = attrs.get("condition")
+        descriptors = attrs.get("descriptors") or []
+
+        prompts = []
+        positive_prompt = query_info.get("object_prompt") or target_object
+        object_prompt = target_object
+        prompts.extend([positive_prompt, object_prompt])
+
+        if color and target_object:
+            prompts.append(f"{color} {target_object}")
+            contrast_colors = [c for c in ["white", "black", "red", "blue", "yellow", "silver", "gray"] if c != color]
+            prompts.extend(f"{c} {target_object}" for c in contrast_colors[:2])
+
+        if condition and target_object:
+            prompts.append(f"{condition} {target_object}")
+            negative_condition = "normal" if condition != "normal" else "damaged"
+            prompts.append(f"{negative_condition} {target_object}")
+
+        for descriptor in descriptors[:2]:
+            if target_object:
+                prompts.append(f"{descriptor} {target_object}")
+
+        scores = self.compare_prompts(image_crop, prompts)
+
+        positive_score = scores.get(positive_prompt, 0.0)
+        object_score = scores.get(object_prompt, positive_score)
+        color_score = scores.get(f"{color} {target_object}", positive_score) if color and target_object else positive_score
+        condition_score = scores.get(f"{condition} {target_object}", positive_score) if condition and target_object else positive_score
+
+        color_contrast = 0.0
+        if color and target_object:
+            competing = [
+                score for prompt, score in scores.items()
+                if prompt.endswith(target_object) and prompt != f"{color} {target_object}" and prompt != positive_prompt
+            ]
+            if competing:
+                color_contrast = color_score - max(competing)
+
+        condition_contrast = 0.0
+        if condition and target_object:
+            alt_prompt = f"{'normal' if condition != 'normal' else 'damaged'} {target_object}"
+            condition_contrast = condition_score - scores.get(alt_prompt, 0.0)
+
+        return {
+            "full_query_score": float(positive_score),
+            "object_score": float(object_score),
+            "attribute_score": float(max(color_score, condition_score, positive_score)),
+            "color_score": float(color_score),
+            "condition_score": float(condition_score),
+            "color_contrast": float(color_contrast),
+            "condition_contrast": float(condition_contrast),
+        }
 
     def crop_detection(self, image: np.ndarray, box: torch.Tensor,
                        padding: int = 10) -> Optional[Image.Image]:

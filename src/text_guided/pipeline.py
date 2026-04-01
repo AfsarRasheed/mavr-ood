@@ -6,6 +6,7 @@ Runs all 7 steps: Scene Agent → Attribute Agent → GroundingDINO → CLIP →
 import gc
 import os
 import json
+import tempfile
 import numpy as np
 import torch
 
@@ -14,6 +15,261 @@ from src.text_guided.attribute_agent import attribute_matching_agent
 from src.text_guided.query_parser import parse_query, llava_parse_query, spatial_filter
 from src.text_guided.visualizer import generate_step_visualizations
 from src.text_guided.reasoning_agent import reasoning_agent
+from src.text_guided.candidate_reasoner import summarize_candidate_match
+from src.text_guided.reliability import determine_match_decision
+from src.agents.vlm_backend import run_vlm
+
+
+def _box_center(box_xyxy):
+    x1, y1, x2, y2 = box_xyxy
+    return np.array([(x1 + x2) / 2.0, (y1 + y2) / 2.0], dtype=np.float32)
+
+
+def _safe_crop(image_np, box_xyxy):
+    from PIL import Image as PILImage
+
+    H, W = image_np.shape[:2]
+    x1, y1, x2, y2 = [int(v) for v in box_xyxy]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(W, x2), min(H, y2)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    crop = image_np[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+    return PILImage.fromarray(crop)
+
+
+def _run_anchor_detection(gdino_model, image_tensor_dev, anchor_text, H, W, threshold=0.25):
+    anchor_caption = anchor_text.lower().strip()
+    if not anchor_caption.endswith("."):
+        anchor_caption += "."
+
+    with torch.no_grad():
+        anchor_outputs = gdino_model(image_tensor_dev[None], captions=[anchor_caption])
+
+    anchor_logits = anchor_outputs["pred_logits"].cpu().sigmoid()[0]
+    anchor_boxes_raw = anchor_outputs["pred_boxes"].cpu()[0]
+    anchor_filt = anchor_logits.max(dim=1)[0] > threshold
+    anchor_boxes_cxcywh = anchor_boxes_raw[anchor_filt]
+
+    if len(anchor_boxes_cxcywh) == 0:
+        return None
+
+    anchor_xyxy = torch.zeros_like(anchor_boxes_cxcywh)
+    anchor_xyxy[:, 0] = (anchor_boxes_cxcywh[:, 0] - anchor_boxes_cxcywh[:, 2] / 2) * W
+    anchor_xyxy[:, 1] = (anchor_boxes_cxcywh[:, 1] - anchor_boxes_cxcywh[:, 3] / 2) * H
+    anchor_xyxy[:, 2] = (anchor_boxes_cxcywh[:, 0] + anchor_boxes_cxcywh[:, 2] / 2) * W
+    anchor_xyxy[:, 3] = (anchor_boxes_cxcywh[:, 1] + anchor_boxes_cxcywh[:, 3] / 2) * H
+    return anchor_xyxy
+
+
+def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anchor2_boxes=None):
+    H, W = image_shape
+    box = np.array(box_xyxy, dtype=np.float32)
+    center = _box_center(box)
+    x_norm = float(center[0] / max(W, 1))
+    y_norm = float(center[1] / max(H, 1))
+    area = float(max(box[2] - box[0], 1) * max(box[3] - box[1], 1))
+    area_norm = area / float(max(H * W, 1))
+
+    spatial = parsed.get("spatial")
+    if not spatial:
+        return 0.6
+
+    if spatial == "left":
+        return float(np.clip(1.0 - x_norm, 0.0, 1.0))
+    if spatial == "right":
+        return float(np.clip(x_norm, 0.0, 1.0))
+    if spatial == "center":
+        return float(np.clip(1.0 - abs(x_norm - 0.5) * 2.0, 0.0, 1.0))
+    if spatial == "top":
+        return float(np.clip(1.0 - y_norm, 0.0, 1.0))
+    if spatial == "bottom":
+        return float(np.clip(y_norm, 0.0, 1.0))
+    if spatial == "largest":
+        return float(np.clip(area_norm * 6.0, 0.0, 1.0))
+    if spatial == "smallest":
+        return float(np.clip(1.0 - area_norm * 6.0, 0.0, 1.0))
+    if spatial in ("nearest", "ahead"):
+        return float(np.clip(y_norm, 0.0, 1.0))
+    if spatial == "farthest":
+        return float(np.clip(1.0 - y_norm, 0.0, 1.0))
+
+    if anchor_boxes is not None and len(anchor_boxes) > 0:
+        anchor = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
+        anchor_center = _box_center(anchor[0])
+        dx = abs(center[0] - anchor_center[0]) / max(W, 1)
+        dy = abs(center[1] - anchor_center[1]) / max(H, 1)
+        dist = float(np.sqrt(dx ** 2 + dy ** 2))
+
+        if spatial == "next_to":
+            return float(np.clip(1.0 - dist * 1.5, 0.0, 1.0))
+        if spatial == "behind":
+            return float(np.clip((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+        if spatial == "in_front":
+            return float(np.clip((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+        if spatial == "above":
+            return float(np.clip((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+        if spatial == "below":
+            return float(np.clip((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+
+    if spatial == "between" and anchor_boxes is not None and anchor2_boxes is not None and len(anchor_boxes) > 0 and len(anchor2_boxes) > 0:
+        anchor1 = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
+        anchor2 = anchor2_boxes.numpy() if torch.is_tensor(anchor2_boxes) else np.array(anchor2_boxes)
+        midpoint = (_box_center(anchor1[0]) + _box_center(anchor2[0])) / 2.0
+        dist = np.linalg.norm((center - midpoint) / np.array([max(W, 1), max(H, 1)], dtype=np.float32))
+        return float(np.clip(1.0 - dist * 2.0, 0.0, 1.0))
+
+    return 0.45
+
+
+def _scene_consistency_score(parsed, scene_result):
+    if not isinstance(scene_result, dict):
+        return 0.5
+
+    target_object = (parsed.get("target_object") or "").lower()
+    color = ((parsed.get("attributes") or {}).get("color") or "").lower()
+    objects = scene_result.get("objects", []) or []
+
+    if not objects:
+        return 0.5
+
+    for obj in objects:
+        name = str(obj.get("name", "")).lower()
+        obj_color = str(obj.get("color", "")).lower()
+        if target_object and target_object in name:
+            if color and color not in name and color not in obj_color:
+                return 0.65
+            return 0.9
+
+    return 0.45
+
+
+def _attribute_agent_score(parsed, attr_result):
+    if not isinstance(attr_result, dict):
+        return 0.5
+
+    ambiguity = str(attr_result.get("ambiguity", "")).lower()
+    matched = attr_result.get("matched_objects", []) or []
+    if not matched:
+        return 0.45 if ambiguity in ("high", "unknown") else 0.55
+
+    confidence_map = {"high": 0.92, "medium": 0.72, "low": 0.52}
+    best = max(confidence_map.get(str(m.get("confidence", "")).lower(), 0.6) for m in matched[:3])
+
+    if ambiguity == "high":
+        best -= 0.1
+    elif ambiguity == "none":
+        best += 0.05
+
+    return float(np.clip(best, 0.0, 1.0))
+
+
+def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scene_result,
+                     attr_result, anchor_boxes=None, anchor2_boxes=None):
+    spatial_score = _compute_spatial_score(
+        box_xyxy,
+        parsed,
+        image_shape=image_shape,
+        anchor_boxes=anchor_boxes,
+        anchor2_boxes=anchor2_boxes,
+    )
+    scene_score = _scene_consistency_score(parsed, scene_result)
+    attr_agent_score = _attribute_agent_score(parsed, attr_result)
+    object_score = float(np.clip((det_score + clip_scores.get("object_score", det_score)) / 2.0, 0.0, 1.0))
+    attribute_score = float(np.clip(
+        max(
+            clip_scores.get("attribute_score", 0.0),
+            clip_scores.get("color_score", 0.0),
+            clip_scores.get("condition_score", 0.0),
+        ),
+        0.0,
+        1.0,
+    ))
+    clip_score = float(np.clip(clip_scores.get("full_query_score", 0.0), 0.0, 1.0))
+
+    final_score = (
+        object_score * 0.28 +
+        attribute_score * 0.22 +
+        clip_score * 0.20 +
+        spatial_score * 0.18 +
+        scene_score * 0.06 +
+        attr_agent_score * 0.06
+    )
+
+    return {
+        "object_score": round(object_score, 4),
+        "attribute_score": round(attribute_score, 4),
+        "clip_score": round(clip_score, 4),
+        "spatial_score": round(spatial_score, 4),
+        "scene_consistency_score": round(scene_score, 4),
+        "attribute_agent_score": round(attr_agent_score, 4),
+        "color_contrast": round(float(clip_scores.get("color_contrast", 0.0)), 4),
+        "condition_contrast": round(float(clip_scores.get("condition_contrast", 0.0)), 4),
+        "final_score": round(float(np.clip(final_score, 0.0, 1.0)), 4),
+    }
+
+
+def _rerank_candidates_with_vlm(image_np, ranked_candidates, user_prompt, max_candidates=3):
+    top = ranked_candidates[:max_candidates]
+    if len(top) < 2:
+        return ranked_candidates
+
+    temp_paths = []
+    try:
+        for candidate in top:
+            crop = _safe_crop(image_np, candidate["box_xyxy"])
+            if crop is None:
+                continue
+            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+            crop.save(tmp.name)
+            temp_paths.append(tmp.name)
+            candidate["crop_path"] = tmp.name
+
+        for idx, candidate in enumerate(top):
+            crop_path = candidate.get("crop_path")
+            if not crop_path:
+                continue
+
+            prompt = f"""User query: "{user_prompt}"
+Candidate rank before reranking: {idx + 1}
+Current structured scores: {json.dumps(candidate.get('scores', {}))}
+
+Evaluate ONLY this crop as a candidate match for the user query.
+Return ONLY valid JSON:
+{{
+  "query_match_score": 0.0,
+  "satisfied_constraints": ["short phrases"],
+  "violated_constraints": ["short phrases"],
+  "reason": "one sentence"
+}}"""
+            response = run_vlm([{"role": "user", "content": prompt}], image_path=crop_path)
+            payload = json.loads(response.strip().replace("```json", "").replace("```", "").strip())
+            vlm_score = float(payload.get("query_match_score", 0.0))
+            candidate["vlm_rerank"] = {
+                "score": round(vlm_score, 4),
+                "reason": payload.get("reason", ""),
+                "satisfied_constraints": payload.get("satisfied_constraints", []),
+                "violated_constraints": payload.get("violated_constraints", []),
+            }
+            candidate["scores"]["vlm_score"] = round(vlm_score, 4)
+            candidate["scores"]["final_score"] = round(
+                float(np.clip(candidate["scores"]["final_score"] * 0.8 + vlm_score * 0.2, 0.0, 1.0)),
+                4,
+            )
+    except Exception as e:
+        print(f"[WARN] VLM candidate reranking skipped: {e}")
+    finally:
+        for candidate in top:
+            candidate.pop("crop_path", None)
+        for path in temp_paths:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    return sorted(ranked_candidates, key=lambda item: item["scores"]["final_score"], reverse=True)
 
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
@@ -183,52 +439,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         all_boxes_xyxy[:, 2] = scaled[:, 0] + scaled[:, 2] / 2
         all_boxes_xyxy[:, 3] = scaled[:, 1] + scaled[:, 3] / 2
 
-    # ---- Step 4: CLIP Verification ----
+    # ---- Step 4/5: CLIP + Full-Query Candidate Ranking ----
     clip_pass_mask = []
     clip_scores_all = []
-
-    if len(boxes_filt) > 0 and clip_verifier is not None:
-        print(f"[i] Running CLIP verification (threshold={clip_threshold})...")
-
-        for i in range(len(all_boxes_xyxy)):
-            box = all_boxes_xyxy[i]
-            x1, y1, x2, y2 = box.int().numpy()
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(W, x2), min(H, y2)
-
-            if x2 <= x1 or y2 <= y1:
-                clip_pass_mask.append(False)
-                clip_scores_all.append(0.0)
-                continue
-
-            crop = image_np[y1:y2, x1:x2]
-            if crop.size == 0:
-                clip_pass_mask.append(False)
-                clip_scores_all.append(0.0)
-                continue
-
-            # Convert numpy crop to PIL for CLIP
-            crop_pil = PILImage.fromarray(crop)
-            similarity = clip_verifier.compute_similarity(crop_pil, parsed['object_prompt'])
-            clip_scores_all.append(similarity)
-            clip_pass_mask.append(similarity >= clip_threshold)
-
-        n_passed = sum(clip_pass_mask)
-        n_rejected = len(clip_pass_mask) - n_passed
-        print(f"[OK] CLIP: {n_passed} passed, {n_rejected} rejected")
-
-        # Fallback: if ALL rejected, keep the best one
-        if n_passed == 0 and len(clip_scores_all) > 0:
-            best_idx = int(np.argmax(clip_scores_all))
-            clip_pass_mask[best_idx] = True
-            print(f"[WARN] All rejected, keeping best (#{best_idx+1}, score={clip_scores_all[best_idx]:.3f})")
-    else:
-        clip_pass_mask = [True] * len(boxes_filt)
-        clip_scores_all = [0.0] * len(boxes_filt)
-
-    passed_indices = [i for i, passed in enumerate(clip_pass_mask) if passed]
-
-    # ---- Step 5: Spatial Filtering ----
+    candidate_details = []
     selected_idx = None
     anchor_boxes = None
 
@@ -236,24 +450,8 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below', 'between'):
         print(f"[i] Detecting anchor object: '{parsed['anchor']}'...")
         try:
-            anchor_caption = parsed['anchor'].lower().strip()
-            if not anchor_caption.endswith("."):
-                anchor_caption += "."
-            with torch.no_grad():
-                anchor_outputs = gdino_model(image_tensor_dev[None], captions=[anchor_caption])
-            anchor_logits = anchor_outputs["pred_logits"].cpu().sigmoid()[0]
-            anchor_boxes_raw = anchor_outputs["pred_boxes"].cpu()[0]
-            anchor_filt = anchor_logits.max(dim=1)[0] > 0.25
-            anchor_boxes_cxcywh = anchor_boxes_raw[anchor_filt]
-
-            if len(anchor_boxes_cxcywh) > 0:
-                # Convert cxcywh to xyxy
-                anchor_xyxy = torch.zeros_like(anchor_boxes_cxcywh)
-                anchor_xyxy[:, 0] = (anchor_boxes_cxcywh[:, 0] - anchor_boxes_cxcywh[:, 2] / 2) * W
-                anchor_xyxy[:, 1] = (anchor_boxes_cxcywh[:, 1] - anchor_boxes_cxcywh[:, 3] / 2) * H
-                anchor_xyxy[:, 2] = (anchor_boxes_cxcywh[:, 0] + anchor_boxes_cxcywh[:, 2] / 2) * W
-                anchor_xyxy[:, 3] = (anchor_boxes_cxcywh[:, 1] + anchor_boxes_cxcywh[:, 3] / 2) * H
-                anchor_boxes = anchor_xyxy
+            anchor_boxes = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor'], H, W)
+            if anchor_boxes is not None and len(anchor_boxes) > 0:
                 print(f"[OK] Found {len(anchor_boxes)} anchor object(s): '{parsed['anchor']}'")
             else:
                 print(f"[WARN] Anchor object '{parsed['anchor']}' not found, falling back to closest")
@@ -265,49 +463,118 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     if parsed.get('anchor2') and parsed.get('spatial') == 'between':
         print(f"[i] Detecting second anchor object: '{parsed['anchor2']}'...")
         try:
-            anchor2_caption = parsed['anchor2'].lower().strip()
-            if not anchor2_caption.endswith("."):
-                anchor2_caption += "."
-            with torch.no_grad():
-                anchor2_outputs = gdino_model(image_tensor_dev[None], captions=[anchor2_caption])
-            anchor2_logits = anchor2_outputs["pred_logits"].cpu().sigmoid()[0]
-            anchor2_boxes_raw = anchor2_outputs["pred_boxes"].cpu()[0]
-            anchor2_filt = anchor2_logits.max(dim=1)[0] > 0.25
-            anchor2_boxes_cxcywh = anchor2_boxes_raw[anchor2_filt]
-
-            if len(anchor2_boxes_cxcywh) > 0:
-                anchor2_xyxy = torch.zeros_like(anchor2_boxes_cxcywh)
-                anchor2_xyxy[:, 0] = (anchor2_boxes_cxcywh[:, 0] - anchor2_boxes_cxcywh[:, 2] / 2) * W
-                anchor2_xyxy[:, 1] = (anchor2_boxes_cxcywh[:, 1] - anchor2_boxes_cxcywh[:, 3] / 2) * H
-                anchor2_xyxy[:, 2] = (anchor2_boxes_cxcywh[:, 0] + anchor2_boxes_cxcywh[:, 2] / 2) * W
-                anchor2_xyxy[:, 3] = (anchor2_boxes_cxcywh[:, 1] + anchor2_boxes_cxcywh[:, 3] / 2) * H
-                anchor2_boxes = anchor2_xyxy
+            anchor2_boxes = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor2'], H, W)
+            if anchor2_boxes is not None and len(anchor2_boxes) > 0:
                 print(f"[OK] Found {len(anchor2_boxes)} second anchor(s): '{parsed['anchor2']}'")
             else:
                 print(f"[WARN] Second anchor '{parsed['anchor2']}' not found")
         except Exception as e:
             print(f"[WARN] Second anchor detection failed: {e}")
 
-    if len(passed_indices) > 0:
-        if parsed['spatial'] and not parsed['detect_all']:
-            passed_boxes = all_boxes_xyxy[passed_indices]
-            local_idx = spatial_filter(
-                passed_boxes,
-                parsed['spatial'],
+    if len(boxes_filt) > 0 and clip_verifier is not None:
+        print(f"[i] Running CLIP verification + natural-language candidate scoring (threshold={clip_threshold})...")
+        for i in range(len(all_boxes_xyxy)):
+            box = all_boxes_xyxy[i]
+            crop_pil = _safe_crop(image_np, box.int().numpy())
+            if crop_pil is None:
+                clip_pass_mask.append(False)
+                clip_scores_all.append(0.0)
+                continue
+
+            clip_score_map = clip_verifier.compute_discriminative_scores(crop_pil, parsed)
+            primary_similarity = clip_score_map.get("full_query_score", 0.0)
+            clip_scores_all.append(primary_similarity)
+            clip_pass_mask.append(primary_similarity >= clip_threshold)
+
+            candidate_scores = _score_candidate(
+                box_xyxy=box.numpy() if torch.is_tensor(box) else box,
+                det_score=all_det_scores[i],
+                clip_scores=clip_score_map,
+                parsed=parsed,
                 image_shape=(H, W),
+                scene_result=scene_result,
+                attr_result=attr_result,
                 anchor_boxes=anchor_boxes,
                 anchor2_boxes=anchor2_boxes,
-                ordinal=parsed.get('ordinal'),
-                ordinal_direction=parsed.get('ordinal_direction'),
             )
-            if local_idx is not None:
-                selected_idx = passed_indices[local_idx]
-                print(f"[OK] Spatial filter '{parsed['spatial']}' selected candidate #{selected_idx+1}")
-            else:
-                selected_idx = passed_indices[0]
-        else:
-            selected_idx = passed_indices
-            print(f"[OK] Keeping all {len(passed_indices)} verified candidates")
+            match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
+            candidate_scores["final_score"] = round(
+                max(0.0, float(candidate_scores["final_score"]) - float(match_analysis["ambiguity_penalty"])),
+                4,
+            )
+            candidate_details.append({
+                "index": i,
+                "label": all_labels[i],
+                "det_score": round(float(all_det_scores[i]), 4),
+                "clip_scores": {k: round(float(v), 4) for k, v in clip_score_map.items()},
+                "scores": candidate_scores,
+                "match_analysis": match_analysis,
+                "box_xyxy": (box.numpy() if torch.is_tensor(box) else np.array(box)).tolist(),
+            })
+
+        n_passed = sum(clip_pass_mask)
+        n_rejected = len(clip_pass_mask) - n_passed
+        print(f"[OK] CLIP: {n_passed} passed, {n_rejected} rejected")
+    else:
+        clip_pass_mask = [True] * len(boxes_filt)
+        clip_scores_all = [0.0] * len(boxes_filt)
+        for i in range(len(all_boxes_xyxy)):
+            candidate_scores = _score_candidate(
+                box_xyxy=all_boxes_xyxy[i].numpy(),
+                det_score=all_det_scores[i],
+                clip_scores={"full_query_score": 0.0, "object_score": all_det_scores[i], "attribute_score": 0.0},
+                parsed=parsed,
+                image_shape=(H, W),
+                scene_result=scene_result,
+                attr_result=attr_result,
+                anchor_boxes=anchor_boxes,
+                anchor2_boxes=anchor2_boxes,
+            )
+            match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
+            candidate_scores["final_score"] = round(
+                max(0.0, float(candidate_scores["final_score"]) - float(match_analysis["ambiguity_penalty"])),
+                4,
+            )
+            candidate_details.append({
+                "index": i,
+                "label": all_labels[i],
+                "det_score": round(float(all_det_scores[i]), 4),
+                "clip_scores": {},
+                "scores": candidate_scores,
+                "match_analysis": match_analysis,
+                "box_xyxy": all_boxes_xyxy[i].numpy().tolist(),
+            })
+
+    if candidate_details and not any(clip_pass_mask):
+        best_idx = int(np.argmax([item["scores"]["final_score"] for item in candidate_details]))
+        clip_pass_mask[best_idx] = True
+        print(f"[WARN] All candidates were below CLIP threshold, keeping best-ranked candidate #{best_idx + 1}")
+
+    ranked_candidates = sorted(candidate_details, key=lambda item: item["scores"]["final_score"], reverse=True)
+    need_rerank = len(ranked_candidates) > 1 and (
+        ranked_candidates[0]["scores"]["final_score"] - ranked_candidates[1]["scores"]["final_score"] < 0.08
+    )
+    enable_vlm_rerank = os.getenv("ENABLE_VLM_RERANK", "0") == "1"
+    if need_rerank and enable_vlm_rerank:
+        print("[i] Top candidates are close; running VLM reranking on leading crops...")
+        ranked_candidates = _rerank_candidates_with_vlm(image_np, ranked_candidates, user_prompt)
+    elif need_rerank:
+        print("[i] Top candidates are close, but VLM reranking is disabled (set ENABLE_VLM_RERANK=1 to enable it).")
+
+    match_decision = determine_match_decision(ranked_candidates)
+    selected_indices = match_decision["selected_indices"]
+    if not selected_indices and ranked_candidates and match_decision["state"] != "no_reliable_match":
+        selected_indices = [ranked_candidates[0]["index"]]
+
+    if selected_indices:
+        selected_idx = selected_indices if len(selected_indices) > 1 else selected_indices[0]
+        print(
+            f"[OK] Candidate ranking selected {selected_indices} "
+            f"with state '{match_decision['state']}' (confidence={match_decision['confidence']:.2f})"
+        )
+    else:
+        selected_idx = None
+        print(f"[WARN] No reliable object selected ({match_decision['reason']})")
 
     # ---- Step 6: SAM Segmentation ----
     final_masks = None
@@ -372,12 +639,20 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     else:
         n_selected = 0
 
+    top_ranked = ranked_candidates[:3] if 'ranked_candidates' in locals() else []
+    match_state = match_decision["state"] if 'match_decision' in locals() else "unknown"
+    match_confidence = match_decision["confidence"] if 'match_decision' in locals() else 0.0
+
     summary_lines = [
         f"TEXT-GUIDED DETECTION RESULTS (Multi-Agent)",
         f"{'='*40}",
         f"Query: \"{user_prompt}\"",
         f"Detection Prompt: '{parsed['object_prompt']}'",
+        f"Target Object: {parsed.get('target_object', 'unknown')}",
         f"Spatial: {parsed.get('spatial', 'None')}",
+        f"Priority Order: {', '.join(parsed.get('priority_order', []))}",
+        f"Match State: {match_state}",
+        f"Match Confidence: {match_confidence:.3f}",
         f"",
         f"STEP 1 - Scene Understanding Agent (LLaVA):",
     ]
@@ -402,6 +677,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         f"",
         f"STEP 3 - GroundingDINO: {n_detected} candidates detected",
         f"STEP 4 - CLIP Verification: {n_verified}/{n_detected} passed",
+        f"STEP 5 - Candidate Ranking: state='{match_state}', confidence={match_confidence:.3f}",
     ])
 
     if clip_scores_all:
@@ -409,9 +685,26 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             status = "PASS" if passed else "REJECT"
             summary_lines.append(f"  #{i+1} {label}: CLIP={score:.3f} [{status}]")
 
+    if top_ranked:
+        summary_lines.append("")
+        summary_lines.append("TOP CANDIDATE SCORES:")
+        for candidate in top_ranked:
+            rank = ranked_candidates.index(candidate) + 1
+            scores = candidate["scores"]
+            summary_lines.append(
+                f"  Rank {rank} -> candidate #{candidate['index'] + 1}: "
+                f"final={scores['final_score']:.3f}, object={scores['object_score']:.3f}, "
+                f"attribute={scores['attribute_score']:.3f}, clip={scores['clip_score']:.3f}, "
+                f"spatial={scores['spatial_score']:.3f}"
+            )
+            if candidate.get("match_analysis", {}).get("reason"):
+                summary_lines.append(f"    Match Analysis: {candidate['match_analysis']['reason']}")
+            if candidate.get("vlm_rerank", {}).get("reason"):
+                summary_lines.append(f"    VLM: {candidate['vlm_rerank']['reason']}")
+
     summary_lines.extend([
         f"",
-        f"STEP 5 - Spatial Filter: '{parsed.get('spatial', 'none')}' -> {n_selected} selected",
+        f"STEP 6 - Selection Outcome: '{match_state}' -> {n_selected} selected",
         f"STEP 6 - SAM Segmentation: {'Complete' if final_masks is not None else 'Skipped'}",
     ])
 
@@ -453,6 +746,23 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "clip_details": clip_detail_str,
         "spatial_term": parsed.get('spatial', 'none'),
         "n_selected": n_selected,
+        "match_state": match_state,
+        "match_confidence": match_confidence,
+        "priority_order": parsed.get('priority_order', []),
+        "top_candidates": [
+            {
+                "candidate_index": candidate["index"] + 1,
+                "final_score": candidate["scores"]["final_score"],
+                "object_score": candidate["scores"]["object_score"],
+                "attribute_score": candidate["scores"]["attribute_score"],
+                "clip_score": candidate["scores"]["clip_score"],
+                "spatial_score": candidate["scores"]["spatial_score"],
+                "reason": candidate.get("match_analysis", {}).get("reason", ""),
+                "satisfied_constraints": candidate.get("match_analysis", {}).get("satisfied_constraints", []),
+                "violated_constraints": candidate.get("match_analysis", {}).get("violated_constraints", []),
+            }
+            for candidate in top_ranked
+        ],
     }
 
     reasoning_text = reasoning_agent(reasoning_data)
@@ -501,6 +811,9 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             "candidates_found": n_detected,
             "clip_verified": n_verified,
             "selected": n_selected,
+            "match_state": match_state,
+            "match_confidence": match_confidence,
+            "candidate_rankings": ranked_candidates,
             "summary": summary,
             "reasoning": reasoning_text,
         }, f, indent=2)
@@ -517,6 +830,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "n_selected": n_selected,
         "final_masks": final_masks,
         "selected_idx": selected_idx,
+        "candidate_rankings": ranked_candidates,
+        "match_state": match_state,
+        "match_confidence": match_confidence,
+        "match_reason": match_decision.get("reason"),
         "summary": summary,
         "reasoning": reasoning_text,
     }

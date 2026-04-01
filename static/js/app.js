@@ -266,6 +266,11 @@ function renderResults(data) {
     if (keys.length > 0) showStep(keys[0], tabsContainer.querySelector('.step-tab'));
     renderStepGallery(keys, data);
 
+    const groundingBlock = document.getElementById('groundingDecisionText');
+    if (groundingBlock) {
+        groundingBlock.innerHTML = renderGroundingDecision(data);
+    }
+
     // Reasoning
     document.getElementById('reasoningText').textContent = data.reasoning || 'No reasoning output.';
 
@@ -321,6 +326,33 @@ function formatGalleryStepName(key) {
         step6_final: 'Step 6: Final Segmentation (SAM)',
     };
     return labels[key] || formatStepName(key);
+}
+
+function renderGroundingDecision(data) {
+    const parsed = data.parsed || {};
+    const rankings = Array.isArray(data.candidate_rankings) ? data.candidate_rankings.slice(0, 3) : [];
+    const priority = Array.isArray(parsed.priority_order) ? parsed.priority_order.join(', ') : '';
+
+    const lines = [
+        renderLine('Result State', formatResultState(data.match_state)),
+        renderLine('Confidence', formatConfidence(data.match_confidence)),
+        renderLine('Reason', escapeHtml(data.match_reason || '')),
+        renderLine('Target Object', escapeHtml(parsed.target_object || parsed.object_prompt || '')),
+        renderLine('Detector Prompt', escapeHtml(parsed.object_prompt || '')),
+        renderLine('Spatial Constraint', escapeHtml(parsed.spatial || 'none')),
+        renderLine('Priority Order', escapeHtml(priority)),
+    ].filter(Boolean);
+
+    if (rankings.length > 0) {
+        const rankingHtml = rankings.map((candidate, idx) => {
+            const scores = candidate.scores || {};
+            const reason = candidate.match_analysis?.reason || '';
+            return `<p><strong style="color:var(--text)">Candidate ${idx + 1}:</strong> <span style="color:var(--text-secondary)">#${(candidate.index ?? 0) + 1} | final ${formatScore(scores.final_score)} | object ${formatScore(scores.object_score)} | attribute ${formatScore(scores.attribute_score)} | spatial ${formatScore(scores.spatial_score)}${reason ? ` | ${escapeHtml(reason)}` : ''}</span></p>`;
+        }).join('');
+        lines.push(rankingHtml);
+    }
+
+    return lines.join('');
 }
 
 function renderOodResults(data) {
@@ -516,6 +548,17 @@ function formatConfidence(value) {
     if (value === null || value === undefined || value === '') return '';
     if (typeof value === 'number') return `${(value * 100).toFixed(0)}%`;
     return escapeHtml(String(value));
+}
+
+function formatScore(value) {
+    if (value === null || value === undefined || value === '') return '--';
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : '--';
+}
+
+function formatResultState(value) {
+    if (!value) return '';
+    return escapeHtml(String(value).replace(/_/g, ' '));
 }
 
 function formatValue(value) {

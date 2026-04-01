@@ -52,6 +52,143 @@ COLOR_TERMS = [
     "bright", "beige", "maroon", "navy", "cyan", "teal",
 ]
 
+CONDITION_TERMS = [
+    "damaged", "broken", "burning", "parked", "moving", "stopped",
+    "crashed", "overturned", "tilted", "fallen", "open", "closed",
+    "old", "new", "dirty", "clean", "blurred", "far", "nearby",
+]
+
+COUNT_TERMS = {
+    "single": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+}
+
+UNIQUENESS_HINTS = [
+    "the only",
+    "single",
+    "unique",
+    "exact",
+]
+
+
+def _extract_terms(text, term_list):
+    found = []
+    for term in term_list:
+        if re.search(rf"\b{re.escape(term)}\b", text):
+            found.append(term)
+    return found
+
+
+def _normalize_anchor(anchor_text):
+    if not anchor_text:
+        return None
+
+    anchor_text = anchor_text.strip(" .,")
+    anchor_text = re.sub(r"^(the|a|an)\s+", "", anchor_text)
+    return anchor_text.strip() or None
+
+
+def _guess_target_object(object_desc):
+    tokens = re.findall(r"[a-zA-Z][a-zA-Z\-]*", object_desc.lower())
+    stopwords = {
+        "the", "a", "an", "on", "at", "in", "to", "from", "of", "with",
+        "near", "next", "side", "left", "right", "top", "bottom", "middle",
+        "center", "between", "behind", "front",
+    }
+    filtered = [
+        token for token in tokens
+        if token not in stopwords and token not in COLOR_TERMS and token not in CONDITION_TERMS
+    ]
+    return filtered[-1] if filtered else object_desc.strip() or None
+
+
+def _build_priority_order(target_object, attributes, spatial, anchor, count):
+    priority = []
+    if target_object:
+        priority.append("object")
+    if attributes:
+        if attributes.get("color"):
+            priority.append("color")
+        if attributes.get("condition"):
+            priority.append("condition")
+        extras = attributes.get("descriptors") or []
+        if extras:
+            priority.append("attributes")
+    if anchor:
+        priority.append("anchor_relation")
+    if spatial and spatial not in ("next_to", "behind", "in_front", "above", "below", "between"):
+        priority.append("region")
+    if count:
+        priority.append("count")
+    return priority or ["object"]
+
+
+def _build_query_result(user_prompt, detection_prompt, target_object=None, color=None,
+                        conditions=None, descriptors=None, spatial=None, anchor=None,
+                        anchor2=None, ordinal=None, ordinal_direction=None,
+                        parser_mode="structured rules"):
+    target_object = target_object or _guess_target_object(detection_prompt or user_prompt)
+    conditions = [c for c in (conditions or []) if c]
+    descriptors = [d for d in (descriptors or []) if d]
+    color = color or None
+    attribute = color or (conditions[0] if conditions else (descriptors[0] if descriptors else None))
+
+    count = None
+    for term, value in COUNT_TERMS.items():
+        if re.search(rf"\b{re.escape(term)}\b", user_prompt.lower()):
+            count = value
+            break
+
+    uniqueness = any(hint in user_prompt.lower() for hint in UNIQUENESS_HINTS) or bool(ordinal)
+    attributes = {
+        "color": color,
+        "condition": conditions[0] if conditions else None,
+        "conditions": conditions,
+        "descriptors": descriptors,
+    }
+    spatial_constraints = {
+        "relation": spatial if spatial in ("next_to", "behind", "in_front", "above", "below", "between") else None,
+        "anchor": _normalize_anchor(anchor),
+        "anchor2": _normalize_anchor(anchor2),
+        "region_bias": spatial if spatial in ("left", "right", "center", "top", "bottom") else None,
+        "size_bias": spatial if spatial in ("largest", "smallest") else None,
+        "depth_bias": spatial if spatial in ("nearest", "farthest", "ahead") else None,
+        "ordinal": ordinal,
+        "ordinal_direction": ordinal_direction,
+    }
+    priority_order = _build_priority_order(
+        target_object,
+        attributes,
+        spatial,
+        anchor,
+        count,
+    )
+
+    result = {
+        "original": user_prompt,
+        "object_prompt": (detection_prompt or user_prompt).strip(),
+        "target_object": target_object,
+        "attribute": attribute,
+        "attributes": attributes,
+        "spatial": spatial,
+        "spatial_constraints": spatial_constraints,
+        "detect_all": spatial is None,
+        "anchor": _normalize_anchor(anchor),
+        "anchor2": _normalize_anchor(anchor2),
+        "ordinal": ordinal,
+        "ordinal_direction": ordinal_direction,
+        "count": count,
+        "unique_expected": uniqueness,
+        "match_type": "single_best_match" if uniqueness or count == 1 or count is None else "multi_match",
+        "priority_order": priority_order,
+        "parser_mode": parser_mode,
+        "full_query_prompt": user_prompt.strip(),
+    }
+    return result
+
 
 def parse_query(user_prompt):
     """
@@ -132,33 +269,31 @@ def parse_query(user_prompt):
             if object_desc.endswith(prep):
                 object_desc = object_desc[:-len(prep)].strip()
 
-    # Extract color/attribute
-    attribute = None
-    for color in COLOR_TERMS:
-        if color in object_desc:
-            attribute = color
-            break
+    colors = _extract_terms(object_desc, COLOR_TERMS)
+    conditions = _extract_terms(object_desc, CONDITION_TERMS)
 
-    # No spatial term = find all
-    detect_all = spatial is None
-
-    # Build the GroundingDINO prompt
     gdino_prompt = object_desc.strip()
     if not gdino_prompt:
         gdino_prompt = user_prompt.strip()
 
-    result = {
-        "original": user_prompt,
-        "object_prompt": gdino_prompt,
-        "attribute": attribute,
-        "spatial": spatial,
-        "detect_all": detect_all,
-        "anchor": anchor,  # NEW: reference object for relational queries
-        "parser_mode": "structured rules",
-    }
+    result = _build_query_result(
+        user_prompt=user_prompt,
+        detection_prompt=gdino_prompt,
+        target_object=_guess_target_object(object_desc),
+        color=colors[0] if colors else None,
+        conditions=conditions,
+        descriptors=[d for d in object_desc.split() if d not in colors and d not in conditions],
+        spatial=spatial,
+        anchor=anchor,
+        parser_mode="structured rules",
+    )
 
     anchor_info = f", anchor='{anchor}'" if anchor else ""
-    print(f"[i] Query parsed: object='{gdino_prompt}', attribute={attribute}, spatial={spatial}{anchor_info}, detect_all={detect_all}")
+    print(
+        f"[i] Query parsed: object='{gdino_prompt}', target='{result.get('target_object')}', "
+        f"attribute={result.get('attribute')}, spatial={spatial}{anchor_info}, "
+        f"priorities={result.get('priority_order')}"
+    )
     return result
 
 
@@ -186,8 +321,13 @@ Return ONLY valid JSON with these fields:
   "anchor2": "second reference object if between query (e.g. 'between truck and bus' -> 'bus'), else null",
   "ordinal": "ordinal position if mentioned (e.g. 'second from right' -> 2), else null",
   "ordinal_direction": "direction for ordinal: 'left'/'right', else null",
-  "attribute": "other descriptors (parked, damaged, moving, large, small), else null",
-  "detection_prompt": "short phrase for object detector (combine object + color + attribute)"
+  "attribute": "other descriptor if only one is obvious (parked, damaged, moving, large, small), else null",
+  "attributes": ["list of all meaningful descriptors beyond the object category"],
+  "condition": "main state/condition descriptor if present, else null",
+  "count": "number requested if explicit, else null",
+  "unique_expected": "true if the user implies a single exact object, else false",
+  "priority_order": ["ordered list of constraints by importance such as object, color, relation, region, condition"],
+  "detection_prompt": "short phrase for object detector (combine object + the most salient appearance words)"
 }}
 
 Examples:
@@ -255,18 +395,39 @@ Return ONLY the JSON, nothing else."""
             except (TypeError, ValueError):
                 ordinal = None
 
-        result = {
-            "original": user_prompt,
-            "object_prompt": detection_prompt,
-            "attribute": parsed_llm.get("color") or parsed_llm.get("attribute"),
-            "spatial": spatial,
-            "detect_all": spatial is None,
-            "anchor": parsed_llm.get("anchor"),
-            "anchor2": parsed_llm.get("anchor2"),
-            "ordinal": ordinal,
-            "ordinal_direction": parsed_llm.get("ordinal_direction"),
-            "parser_mode": "llava-assisted",
-        }
+        extra_attributes = parsed_llm.get("attributes") or []
+        if isinstance(extra_attributes, str):
+            extra_attributes = [extra_attributes]
+        color = parsed_llm.get("color")
+        attribute = parsed_llm.get("attribute")
+        condition = parsed_llm.get("condition") or (
+            attribute if attribute and attribute not in COLOR_TERMS else None
+        )
+        descriptors = [item for item in extra_attributes if item and item != condition and item != color]
+
+        result = _build_query_result(
+            user_prompt=user_prompt,
+            detection_prompt=detection_prompt,
+            target_object=parsed_llm.get("object"),
+            color=color,
+            conditions=[condition] if condition else [],
+            descriptors=descriptors,
+            spatial=spatial,
+            anchor=parsed_llm.get("anchor"),
+            anchor2=parsed_llm.get("anchor2"),
+            ordinal=ordinal,
+            ordinal_direction=parsed_llm.get("ordinal_direction"),
+            parser_mode="llava-assisted",
+        )
+        if parsed_llm.get("count") not in (None, ""):
+            try:
+                result["count"] = int(parsed_llm.get("count"))
+            except (TypeError, ValueError):
+                pass
+        if isinstance(parsed_llm.get("unique_expected"), bool):
+            result["unique_expected"] = parsed_llm["unique_expected"]
+        if parsed_llm.get("priority_order"):
+            result["priority_order"] = parsed_llm["priority_order"]
 
         anchor_info = f", anchor='{result['anchor']}'" if result.get("anchor") else ""
         anchor2_info = f", anchor2='{result['anchor2']}'" if result.get("anchor2") else ""
