@@ -14,8 +14,8 @@ let seconds = 0;
 // ── Initialize ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     initUpload('dropZone', 'fileInput', 'imagePreview', 'uploadPlaceholder', 'clearBtn', (f) => selectedFile = f);
-    initUpload('oodDropZone', 'oodFileInput', 'oodImagePreview', 'oodUploadPlaceholder', null, (f) => oodFile = f);
-    initUpload('gtDropZone', 'gtFileInput', 'gtImagePreview', 'gtUploadPlaceholder', null, (f) => gtFile = f);
+    initUpload('oodDropZone', 'oodFileInput', 'oodImagePreview', 'oodUploadPlaceholder', 'oodClearBtn', (f) => oodFile = f);
+    initUpload('gtDropZone', 'gtFileInput', 'gtImagePreview', 'gtUploadPlaceholder', 'gtClearBtn', (f) => gtFile = f);
     initComparison();
     checkHealth();
 });
@@ -84,6 +84,23 @@ function clearImage() {
     document.getElementById('uploadPlaceholder').style.display = 'flex';
     document.getElementById('clearBtn').style.display = 'none';
     document.getElementById('fileInput').value = '';
+}
+
+function clearOodImage() {
+    clearUploadState('oodImagePreview', 'oodUploadPlaceholder', 'oodClearBtn', 'oodFileInput');
+    oodFile = null;
+}
+
+function clearGtMask() {
+    clearUploadState('gtImagePreview', 'gtUploadPlaceholder', 'gtClearBtn', 'gtFileInput');
+    gtFile = null;
+}
+
+function clearUploadState(previewId, placeholderId, clearBtnId, inputId) {
+    document.getElementById(previewId).style.display = 'none';
+    document.getElementById(placeholderId).style.display = 'flex';
+    document.getElementById(clearBtnId).style.display = 'none';
+    document.getElementById(inputId).value = '';
 }
 
 function setQuery(text) {

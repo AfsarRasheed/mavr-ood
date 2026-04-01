@@ -248,7 +248,7 @@
         <!-- ═══ TAB 2: OOD Detection ═══ -->
         <div class="tab-content" id="oodTab">
             <section class="ood-input-section">
-                <div class="glass-card">
+                <div class="glass-card upload-card">
                     <label class="input-label">Upload Road Scene</label>
                     <div class="upload-zone" id="oodDropZone">
                         <input type="file" id="oodFileInput" accept="image/*" hidden>
@@ -265,9 +265,10 @@
                             <p class="upload-hint">Detect anomalous objects automatically</p>
                         </div>
                     </div>
+                    <button class="btn-clear" id="oodClearBtn" style="display:none" onclick="clearOodImage()">Clear</button>
                 </div>
 
-                <div class="glass-card">
+                <div class="glass-card upload-card">
                     <label class="input-label">Ground Truth Mask (Optional)</label>
                     <div class="upload-zone" id="gtDropZone" style="min-height:200px">
                         <input type="file" id="gtFileInput" accept="image/png" hidden>
@@ -284,6 +285,7 @@
                             <p class="upload-hint">PNG mask for evaluation metrics</p>
                         </div>
                     </div>
+                    <button class="btn-clear" id="gtClearBtn" style="display:none" onclick="clearGtMask()">Clear</button>
 
                     <button class="btn-detect" id="oodDetectBtn" style="width:100%;justify-content:center;margin-top:16px" onclick="runOodDetection()">
                         <span class="btn-text">Run OOD Detection</span>
