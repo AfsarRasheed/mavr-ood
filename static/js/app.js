@@ -379,7 +379,6 @@ function renderOodResults(data) {
     panelsGrid.innerHTML = '';
 
     const reasoningText = data.reasoning || 'No reasoning summary available.';
-    const anomalyType = data.anomaly_type || 'Unspecified anomaly';
 
     const panelData = [
         {
@@ -420,7 +419,6 @@ function renderOodResults(data) {
     if (reasoningBlock) {
         reasoningBlock.innerHTML = `
             <strong>Reasoning:</strong> ${escapeHtml(reasoningText)}
-            ${anomalyType ? `<br><br><strong>Anomaly Type:</strong> ${escapeHtml(anomalyType)}` : ''}
         `;
     }
 
