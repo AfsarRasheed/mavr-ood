@@ -328,13 +328,17 @@ function renderOodResults(data) {
     section.style.display = 'block';
     const agentDetails = document.getElementById('agentAnalysisDetails');
     if (agentDetails) agentDetails.open = false;
+    const metricsBlock = document.getElementById('oodMetrics');
 
     // Metrics with animated bars
     if (data.metrics) {
+        if (metricsBlock) metricsBlock.style.display = 'grid';
         setOodMetric('oodIou', 'oodIouBar', data.metrics.iou);
         setOodMetric('oodF1', 'oodF1Bar', data.metrics.f1);
         setOodMetric('oodPrecision', 'oodPrecisionBar', data.metrics.precision);
         setOodMetric('oodRecall', 'oodRecallBar', data.metrics.recall);
+    } else if (metricsBlock) {
+        metricsBlock.style.display = 'none';
     }
 
     // Reasoning-style OOD panels
