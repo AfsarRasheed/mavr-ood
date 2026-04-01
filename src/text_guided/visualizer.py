@@ -8,6 +8,31 @@ import numpy as np
 import torch
 
 
+def _wrap_overlay_text(text, max_chars=58, indent=""):
+    """
+    Wrap long overlay strings so the text stays inside the visualization box.
+    """
+    if not text:
+        return []
+
+    words = str(text).split()
+    lines = []
+    current = indent
+
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) > max_chars and current.strip():
+            lines.append(current.rstrip())
+            current = f"{indent}{word}".strip()
+        else:
+            current = candidate
+
+    if current.strip():
+        lines.append(current.rstrip())
+
+    return lines
+
+
 def generate_step_visualizations(image_np, scene_result, parsed_query,
                                   all_boxes_xyxy, all_labels, all_scores,
                                   clip_mask, clip_scores,
@@ -48,37 +73,26 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
     # ---- Step 2: Attribute Matching Agent ----
     step2 = image_np.copy()
     agent2_info = []
-    original_query = str(parsed_query.get("original", ""))
-    detection_prompt = str(parsed_query.get("object_prompt", ""))
-    if len(original_query) > 34:
-        original_query = original_query[:31] + "..."
-    if len(detection_prompt) > 28:
-        detection_prompt = detection_prompt[:25] + "..."
-
-    agent2_info.append(f"Query: \"{original_query}\"")
-    agent2_info.append(f"Detection Prompt: \"{detection_prompt}\"")
+    agent2_info.extend(_wrap_overlay_text(f"Query: \"{parsed_query.get('original', '')}\"", max_chars=54))
+    agent2_info.extend(_wrap_overlay_text(f"Detection Prompt: \"{parsed_query.get('object_prompt', '')}\"", max_chars=54))
     agent2_info.append(f"Attribute: {parsed_query.get('attribute', 'None')}")
     agent2_info.append(f"Spatial: {parsed_query.get('spatial', 'None (detect all)')}")
 
     attr_result = parsed_query.get('attr_agent_result', {})
     if isinstance(attr_result, dict):
+        reasoning = attr_result.get('reasoning', '')
         ambiguity = attr_result.get('ambiguity', 'N/A')
+        if reasoning:
+            agent2_info.extend(_wrap_overlay_text(f"Reasoning: {reasoning}", max_chars=58))
         agent2_info.append(f"Ambiguity: {ambiguity}")
         matched = attr_result.get('matched_objects', [])
-        best_match = matched[0] if matched else None
-        if isinstance(best_match, dict):
-            match_name = best_match.get('name', '?')
-            match_pos = best_match.get('position', '?')
-            match_conf = best_match.get('confidence', 'N/A') or 'N/A'
-            agent2_info.append(f"Best Match: {match_name} ({match_pos})")
-            agent2_info.append(f"Confidence: {match_conf}")
-
-        for m in matched[1:2]:
+        for m in matched[:3]:
             conf = m.get('confidence', 'N/A') or 'N/A'
-            agent2_info.append(f"Alt Match: {m.get('name','')} ({m.get('position','')}) [{conf}]")
+            match_text = f"Match: {m.get('name','')} ({m.get('position','')}) [{conf}]"
+            agent2_info.extend(_wrap_overlay_text(match_text, max_chars=56, indent="  "))
 
     overlay2 = step2.copy()
-    box_width = min(470, W - 20)
+    box_width = min(560, W - 20)
     box_height = min(36 + len(agent2_info) * 22, H - 20)
     cv2.rectangle(overlay2, (10, 10), (10 + box_width, 10 + box_height), (0, 0, 0), -1)
     step2 = cv2.addWeighted(overlay2, 0.7, step2, 0.3, 0)
