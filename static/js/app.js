@@ -346,6 +346,8 @@ function formatGalleryStepName(key) {
 function renderOodResults(data) {
     const section = document.getElementById('oodResults');
     section.style.display = 'block';
+    const agentDetails = document.getElementById('agentAnalysisDetails');
+    if (agentDetails) agentDetails.open = false;
 
     // Metrics with animated bars
     if (data.metrics) {
@@ -503,10 +505,7 @@ function summarizeVisualAgent(val) {
 }
 
 function summarizeSynthesisAgent(val) {
-    const prompts = val.grounded_sam_prompts || {};
     return [
-        renderLine('Prompt V1', prompts.prompt_v1),
-        renderLine('Prompt V2', prompts.prompt_v2),
         renderLine('Anomaly Type', val.anomaly_type),
         renderLine('Reasoning', val.reasoning),
         renderLine('Confidence', formatConfidence(val.overall_confidence)),
