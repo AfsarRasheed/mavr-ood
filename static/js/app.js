@@ -322,25 +322,55 @@ function renderOodResults(data) {
         setOodMetric('oodRecall', 'oodRecallBar', data.metrics.recall);
     }
 
-    // Result images
-    const grid = document.getElementById('oodResultsGrid');
-    grid.innerHTML = '';
-    const imageTypes = [
-        ['detection', 'Bounding Boxes'],
-        ['masks', 'SAM Masks'],
-        ['binary_mask', 'OOD Mask'],
+    // Reasoning-style OOD panels
+    const panelsGrid = document.getElementById('oodPanelsGrid');
+    panelsGrid.innerHTML = '';
+
+    const reasoningText = data.reasoning || 'No reasoning summary available.';
+    const anomalyType = data.anomaly_type || 'Unspecified anomaly';
+
+    const panelData = [
+        {
+            title: 'Panel A: Input Image',
+            image: data.original_image,
+            imageLabel: 'Input Scene',
+            extra: '',
+        },
+        {
+            title: 'Panel B: GroundingDINO + CLIP Verifier',
+            image: data.images?.detection,
+            imageLabel: 'Detection Result',
+            extra: '',
+        },
+        {
+            title: 'Panel C: Final SAM Segmentation',
+            image: data.images?.binary_mask || data.images?.masks,
+            imageLabel: 'Final Segmentation',
+            extra: '',
+        },
     ];
-    imageTypes.forEach(([key, label]) => {
-        if (data.images && data.images[key]) {
-            const card = document.createElement('div');
-            card.className = 'ood-result-card';
-            card.innerHTML = `
-                <img src="data:image/jpeg;base64,${data.images[key]}" alt="${label}">
-                <div class="ood-result-label">${label}</div>
-            `;
-            grid.appendChild(card);
-        }
+
+    panelData.forEach((panel) => {
+        if (!panel.image) return;
+        const card = document.createElement('div');
+        card.className = 'ood-panel-card';
+        card.innerHTML = `
+            <div class="ood-panel-title">${panel.title}</div>
+            <div class="ood-panel-image-wrap">
+                <img class="ood-panel-image" src="data:image/jpeg;base64,${panel.image}" alt="${panel.imageLabel}">
+            </div>
+            ${panel.extra}
+        `;
+        panelsGrid.appendChild(card);
     });
+
+    const reasoningBlock = document.getElementById('oodReasoningText');
+    if (reasoningBlock) {
+        reasoningBlock.innerHTML = `
+            <strong>Reasoning:</strong> ${escapeHtml(reasoningText)}
+            ${anomalyType ? `<br><br><strong>Anomaly Type:</strong> ${escapeHtml(anomalyType)}` : ''}
+        `;
+    }
 
     // Agent analysis
     const agentGrid = document.getElementById('agentCardsGrid');

@@ -730,6 +730,64 @@ body {
     letter-spacing: 0.5px;
 }
 
+.ood-panels-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin-bottom: 28px;
+}
+
+.ood-panel-card {
+    background: rgba(255,255,255,0.72);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.ood-panel-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+}
+
+.ood-panel-image-wrap {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: white;
+}
+
+.ood-panel-image {
+    width: 100%;
+    display: block;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+}
+
+.ood-reasoning-box {
+    background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.ood-reasoning-box strong {
+    color: var(--text);
+}
+
+.ood-reasoning-card {
+    margin-bottom: 28px;
+}
+
 .ood-metrics-row {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -825,6 +883,7 @@ body {
     .input-section, .ood-input-section { grid-template-columns: 1fr; }
     .metrics-row, .ood-metrics-row { grid-template-columns: repeat(2, 1fr); }
     .ood-results-grid { grid-template-columns: 1fr 1fr; }
+    .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr 1fr; }
     .pipeline-steps { flex-wrap: wrap; gap: 8px; }
     .p-step-line { display: none; }
@@ -833,6 +892,7 @@ body {
 @media (max-width: 480px) {
     .metrics-row, .ood-metrics-row { grid-template-columns: 1fr; }
     .ood-results-grid { grid-template-columns: 1fr; }
+    .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr; }
     .nav-tab { padding: 10px 12px; font-size: 12px; }
 }
