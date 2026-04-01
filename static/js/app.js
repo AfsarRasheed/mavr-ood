@@ -7,6 +7,7 @@ let selectedFile = null;
 let oodFile = null;
 let gtFile = null;
 let stepImages = {};
+let currentTextGuidedResult = null;
 let timer = null;
 let seconds = 0;
 
@@ -216,6 +217,7 @@ function completeProgress() {
 
 // ── Render Text-Guided Results ──────────────────────
 function renderResults(data) {
+    currentTextGuidedResult = data;
     const section = document.getElementById('resultsSection');
     section.style.display = 'block';
 
@@ -251,7 +253,7 @@ function renderResults(data) {
         tabsContainer.appendChild(btn);
     });
     if (keys.length > 0) showStep(keys[0], tabsContainer.querySelector('.step-tab'));
-    renderStepGallery(keys);
+    renderStepGallery(keys, data);
 
     // Reasoning
     document.getElementById('reasoningText').textContent = data.reasoning || 'No reasoning output.';
@@ -278,7 +280,7 @@ function showStep(key, tab) {
 }
 
 // ── Render OOD Results ──────────────────────────────
-function renderStepGallery(keys) {
+function renderStepGallery(keys, data) {
     const grid = document.getElementById('stepsGalleryGrid');
     if (!grid) return;
 
@@ -288,14 +290,45 @@ function renderStepGallery(keys) {
 
         const card = document.createElement('div');
         card.className = 'step-gallery-card';
+        const extraDetails = buildStepGalleryDetails(key, data || currentTextGuidedResult);
         card.innerHTML = `
             <div class="step-gallery-image-wrap">
                 <img class="step-gallery-image" src="data:image/jpeg;base64,${stepImages[key]}" alt="${formatGalleryStepName(key)}">
             </div>
             <div class="step-gallery-title">${formatGalleryStepName(key)}</div>
+            ${extraDetails}
         `;
         grid.appendChild(card);
     });
+}
+
+function buildStepGalleryDetails(key, data) {
+    if (!data || key !== 'step2_query') return '';
+
+    const reasoning = (data.attribute_reasoning || '').trim();
+    const ambiguity = (data.attribute_ambiguity || '').trim();
+    const matches = Array.isArray(data.attribute_matches) ? data.attribute_matches : [];
+
+    if (!reasoning && !ambiguity && matches.length === 0) return '';
+
+    let html = '<div class="step-gallery-details">';
+    if (reasoning) {
+        html += `<p><strong>Reasoning:</strong> ${escapeHtml(reasoning)}</p>`;
+    }
+    if (ambiguity) {
+        html += `<p><strong>Ambiguity:</strong> ${escapeHtml(ambiguity)}</p>`;
+    }
+    if (matches.length > 0) {
+        const lines = matches.slice(0, 2).map((match) => {
+            const name = match?.name || 'Unknown';
+            const pos = match?.position || 'unknown position';
+            const conf = match?.confidence || 'N/A';
+            return `${name} (${pos}) [${conf}]`;
+        });
+        html += `<p><strong>Matches:</strong> ${escapeHtml(lines.join(' | '))}</p>`;
+    }
+    html += '</div>';
+    return html;
 }
 
 function formatGalleryStepName(key) {

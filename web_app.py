@@ -180,6 +180,7 @@ async def detect(
 
         # Parse query info
         parsed = results.get('parsed_query', {})
+        attr_result = results.get('attr_result', {}) or {}
 
         return JSONResponse({
             "success": True,
@@ -195,6 +196,9 @@ async def detect(
             "step_images": step_images_b64,
             "final_overlay": final_overlay,
             "original_image": img_to_b64(img_np),
+            "attribute_reasoning": attr_result.get('reasoning', ''),
+            "attribute_ambiguity": attr_result.get('ambiguity', ''),
+            "attribute_matches": attr_result.get('matched_objects', []),
             "reasoning": results.get('reasoning', 'No reasoning available.'),
             "summary": results.get('summary', ''),
         })

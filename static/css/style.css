@@ -682,6 +682,28 @@ body {
     padding: 0 10px;
 }
 
+.step-gallery-details {
+    background: rgba(255, 107, 53, 0.04);
+    border: 1px solid rgba(255, 107, 53, 0.12);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.step-gallery-details p {
+    margin: 0 0 8px;
+}
+
+.step-gallery-details p:last-child {
+    margin-bottom: 0;
+}
+
+.step-gallery-details strong {
+    color: var(--text);
+}
+
 /* Reasoning */
 .reasoning-card { margin-bottom: 28px; }
 .reasoning-text {
