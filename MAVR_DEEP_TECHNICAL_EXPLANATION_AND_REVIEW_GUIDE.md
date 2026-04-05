@@ -190,62 +190,81 @@ Once Agent 5 produces the grounding prompts, the pipeline continues:
 
 ---
 
-## 1.4 Technical Architecture for OOD
+## 1.4 Combined System Architecture (OOD + Text-Guided)
+
+The following diagram shows the **complete MAVR-OOD architecture** with both pipelines sharing a common detection engine:
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                    Image Input (Road Scene)                     │
-└────────────────────┬───────────────────────────────────────────┘
-                     │
-     ┌───────────────┼───────────────┬───────────────┐
-     ▼               ▼               ▼               ▼
-┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
-│ Agent 1  │   │ Agent 2  │   │ Agent 3  │   │ Agent 4  │
-│  Scene   │   │ Spatial  │   │ Semantic │   │  Visual  │
-│ Context  │   │ Anomaly  │   │Inconsist.│   │Appearance│
-│ LLaVA-7B │   │ LLaVA-7B │   │ LLaVA-7B │   │ LLaVA-7B │
-└────┬─────┘   └────┬─────┘   └────┬─────┘   └────┬─────┘
-     │               │               │               │
-     └───────────────┼───────────────┼───────────────┘
-                     │               │
-                     ▼               ▼
-              ┌─────────────────────────┐
-              │      Agent 5            │
-              │ Reasoning Synthesizer   │
-              │       LLaVA-7B          │
-              │                         │
-              │ Output: prompt_v1,      │
-              │         prompt_v2,      │
-              │         confidence      │
-              └──────────┬──────────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │   GroundingDINO     │
-              │  (SwinT backbone)   │
-              │  Box Detection      │
-              └──────────┬──────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │   CLIP ViT-B/32     │
-              │  Semantic Verify    │
-              └──────────┬──────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │   SAM ViT-H         │
-              │  Pixel Segmentation │
-              └──────────┬──────────┘
-                         │
-                         ▼
-              ┌─────────────────────┐
-              │  Output:            │
-              │  - Bounding Boxes   │
-              │  - SAM Masks        │
-              │  - Binary OOD Mask  │
-              │  - Metrics (if GT)  │
-              └─────────────────────┘
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    MAVR-OOD: Combined System Architecture                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+                          ┌─────────────────────┐
+                          │  Road Scene Image    │
+                          │     Input (RGB)      │
+                          └──────────┬──────────┘
+                                     │
+                    ┌────────────────┴────────────────┐
+                    ▼                                  ▼
+ ┌──────────────────────────────┐   ┌──────────────────────────────────┐
+ │    OOD DETECTION PIPELINE    │   │   TEXT-GUIDED DETECTION PIPELINE  │
+ │                              │   │                                  │
+ │                              │   │  ┌──────────────────────────┐   │
+ │  ┌────────────────────────┐  │   │  │ 🔍 User Query Input       │   │
+ │  │ 1│ Scene Context       │  │   │  │ "the red car on the left" │   │
+ │  │  │ Analyzer  [LLaVA-7B]│  │   │  └──────────┬───────────────┘   │
+ │  └────────────────────────┘  │   │              │                   │
+ │  ┌────────────────────────┐  │   │  ┌───────────▼──────────────┐   │
+ │  │ 2│ Spatial Anomaly     │  │   │  │ 1│ Scene Understanding   │   │
+ │  │  │ Detector  [LLaVA-7B]│  │   │  │  │ Agent      [LLaVA-7B]│   │
+ │  └────────────────────────┘  │   │  └──────────┬───────────────┘   │
+ │  ┌────────────────────────┐  │   │  ┌──────────▼───────────────┐   │
+ │  │ 3│ Semantic Inconsist. │  │   │  │ 2│ Attribute Matching    │   │
+ │  │  │ Analyzer  [LLaVA-7B]│  │   │  │  │ Agent      [LLaVA-7B]│   │
+ │  └────────────────────────┘  │   │  └──────────┬───────────────┘   │
+ │  ┌────────────────────────┐  │   │  ┌──────────▼───────────────┐   │
+ │  │ 4│ Visual Appearance   │  │   │  │ 3│ Advanced Query Parser │   │
+ │  │  │ Evaluator [LLaVA-7B]│  │   │  │  │            [LLaVA-7B]│   │
+ │  └──────────┬─────────────┘  │   │  └──────────┬───────────────┘   │
+ │         ┌───┴───┐            │   │              │                   │
+ │         ▼ ▼ ▼ ▼              │   │  ┌───────────▼──────────────┐   │
+ │  ┌────────────────────────┐  │   │  │ ⚡ FREE LLaVA FROM GPU   │   │
+ │  │ 5│ Reasoning           │  │   │  └──────────┬───────────────┘   │
+ │  │  │ Synthesizer         │  │   │              │                   │
+ │  │  │          [LLaVA-7B] │  │   │              │                   │
+ │  └──────────┬─────────────┘  │   │              │                   │
+ │             │                │   │              │                   │
+ │     prompt_v1, prompt_v2     │   │   object_prompt + spatial_term   │
+ └─────────────┬────────────────┘   └──────────────┬───────────────────┘
+               │                                    │
+               └──────────────┬─────────────────────┘
+                              ▼
+ ╔════════════════════════════════════════════════════════════════════════╗
+ ║              SHARED DETECTION & SEGMENTATION ENGINE                    ║
+ ║                                                                        ║
+ ║  ┌──────────────┐    ┌──────────────┐    ┌────────────┐    ┌────────┐ ║
+ ║  │ GroundingDINO │───▶│ CLIP ViT-B/32│───▶│  Spatial   │───▶│  SAM   │ ║
+ ║  │   (SwinT)    │    │              │    │  Filter    │    │ ViT-H  │ ║
+ ║  │   172M       │    │    151M      │    │            │    │  636M  │ ║
+ ║  │              │    │              │    │ left/right │    │        │ ║
+ ║  │ Open-Vocab   │    │  Semantic    │    │ largest    │    │ Pixel  │ ║
+ ║  │ Detection    │    │ Verification │    │ between    │    │ Segm.  │ ║
+ ║  └──────────────┘    └──────────────┘    └────────────┘    └────────┘ ║
+ ╚════════════════════════════════════════════════════════════════╤═══════╝
+                                                                  │
+                              ┌────────────────────────────────────┘
+                              ▼
+ ┌─────────────────┐  ┌────────────────┐  ┌──────────────┐  ┌───────────┐
+ │ Bounding Boxes  │  │  Segmentation  │  │ Binary OOD   │  │ Reasoning │
+ │                 │  │    Masks       │  │    Mask      │  │Explanation│
+ │ (x1,y1,x2,y2)  │  │  (pixel-level) │  │ (anomaly     │  │ (LLaVA-7B │
+ │                 │  │               │  │  overlay)    │  │ Step 7)   │
+ └─────────────────┘  └────────────────┘  └──────────────┘  └───────────┘
+
+ ─────────────────────────────────────────────────────────────────────────
+  GPU Memory: LLaVA-7B (5GB, 4-bit) → freed → GDINO+SAM+CLIP (3.4GB)
+  Models: 4 | OOD Agents: 5 | Text-Guided Steps: 7 | Training: Zero-shot
+ ─────────────────────────────────────────────────────────────────────────
 ```
 
 ### Model Specifications
@@ -288,44 +307,42 @@ Text-Guided Detection allows a user to describe an object in natural language an
 ## 2.2 The 7-Step Text-Guided Pipeline
 
 ```
-User: "the white car on the right" + Image
-    │
-    ▼
-┌──────────────────────────────────────────────────────────┐
-│ Step 1: Scene Understanding Agent (LLaVA-7B)             │
-│   Analyzes scene type, lighting, enumerates all objects   │
-│   Output: scene JSON with objects list                    │
-├──────────────────────────────────────────────────────────┤
-│ Step 2: Attribute Matching Agent (LLaVA-7B)              │
-│   Matches user query to scene objects                     │
-│   Output: matched objects, recommended prompt, reasoning  │
-├──────────────────────────────────────────────────────────┤
-│ Step 2.5: Advanced Query Parsing (LLaVA-7B)             │
-│   Extracts: object, color, spatial term, anchor object    │
-│   Output: structured parse (object_prompt, spatial, etc.) │
-├──────────────────────────────────────────────────────────┤
-│         *** FREE LLaVA FROM GPU ***                      │
-├──────────────────────────────────────────────────────────┤
-│ Step 3: Candidate Detection (GroundingDINO)              │
-│   Detects all objects matching the prompt                 │
-│   Output: N bounding boxes with confidence scores         │
-├──────────────────────────────────────────────────────────┤
-│ Step 4: CLIP Verification                                │
-│   Verifies each candidate matches the query semantically  │
-│   Output: passed/rejected for each candidate              │
-├──────────────────────────────────────────────────────────┤
-│ Step 5: Spatial Filtering                                │
-│   Applies spatial logic (left, right, largest, between)   │
-│   Output: the single correct object                       │
-├──────────────────────────────────────────────────────────┤
-│ Step 6: SAM Segmentation                                 │
-│   Generates pixel-precise mask for selected object        │
-│   Output: segmentation mask overlay                       │
-├──────────────────────────────────────────────────────────┤
-│ Step 7: Reasoning Agent (LLaVA-7B)                       │
-│   Explains why this object was selected                   │
-│   Output: natural language explanation                    │
-└──────────────────────────────────────────────────────────┘
+  User: "the white car on the right" + Road Scene Image
+  ─────────────────────────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ STEP 1 │ Scene Understanding Agent                   [LLaVA-7B]│
+  │        │ → Analyzes scene type, lighting                       │
+  │        │ → Enumerates all objects with positions & colors       │
+  │        │ → Output: scene JSON                                  │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 2 │ Attribute Matching Agent                    [LLaVA-7B]│
+  │        │ → Matches user query to scene objects                 │
+  │        │ → Output: matched objects, recommended prompt         │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 3 │ Advanced Query Parser                       [LLaVA-7B]│
+  │        │ → Extracts: object, color, spatial, anchor, ordinal   │
+  │        │ → Output: structured parse {object_prompt, spatial}   │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │   ⚡   │ FREE LLaVA FROM GPU MEMORY                            │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 4 │ Candidate Detection                     [GroundingDINO]│
+  │        │ → Detects all objects matching the prompt              │
+  │        │ → Output: N bounding boxes + confidence scores         │
+  │        │ → Retry logic: lower threshold → raw prompt fallback   │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 5 │ Semantic Verification                    [CLIP ViT-B/32]│
+  │        │ → Crops each candidate, computes text-image similarity │
+  │        │ → Output: passed/rejected per candidate                │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 6 │ Spatial Filtering                         [Rule Engine]│
+  │        │ → Applies: left/right/largest/between/ordinal          │
+  │        │ → Output: the single correct object                    │
+  ├────────┼───────────────────────────────────────────────────────┤
+  │ STEP 7 │ SAM Segmentation + Reasoning       [SAM ViT-H + LLaVA]│
+  │        │ → Pixel-precise mask for selected object               │
+  │        │ → Natural language explanation of the decision          │
+  └────────┴───────────────────────────────────────────────────────┘
 ```
 
 ---
