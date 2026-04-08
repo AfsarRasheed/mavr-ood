@@ -196,6 +196,7 @@ async def detect(
                 "anchor": parsed.get('anchor'),
                 "priority_order": parsed.get('priority_order', []),
                 "match_type": parsed.get('match_type'),
+                "semantic_plan": results.get('semantic_plan', {}),
             },
             "step_images": step_images_b64,
             "final_overlay": final_overlay,

@@ -50,6 +50,8 @@ def reasoning_agent(pipeline_data):
     match_confidence = pipeline_data.get("match_confidence", 0.0)
     priority_order = pipeline_data.get("priority_order", [])
     top_candidates = pipeline_data.get("top_candidates", [])
+    semantic_query_type = pipeline_data.get("semantic_query_type", "unknown")
+    semantic_plan = pipeline_data.get("semantic_plan", {})
 
     context = f"""A multi-agent vision-language detection pipeline processed a road scene image with the following results:
 
@@ -59,6 +61,8 @@ Attribute Matching: {reasoning}. Ambiguity level: {ambiguity}. Detection prompt 
 Object Detection: GroundingDINO detected {n_candidates} candidate region(s) matching the prompt.
 Semantic Verification: CLIP verified {n_verified} candidate(s), rejected {n_rejected}. {clip_details}
 Constraint Priority: {priority_order}
+Semantic Query Type: {semantic_query_type}
+Semantic Plan: {semantic_plan}
 Candidate Ranking: final decision state = {match_state}, confidence = {match_confidence:.3f}, top candidates = {top_candidates}
 Spatial Selection: Spatial filter '{spatial_term}' considered during ranking, {n_selected} object(s) selected.
 Segmentation: SAM generated pixel-precise segmentation mask for the selected object."""

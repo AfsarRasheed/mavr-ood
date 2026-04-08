@@ -16,6 +16,8 @@ from src.text_guided.query_parser import llava_parse_query
 from src.text_guided.visualizer import generate_step_visualizations
 from src.text_guided.reasoning_agent import reasoning_agent
 from src.text_guided.candidate_reasoner import summarize_candidate_match
+from src.text_guided.semantic_controller import build_semantic_plan
+from src.text_guided.candidate_judge import judge_candidate_against_plan
 from src.text_guided.reliability import determine_match_decision
 from src.agents.vlm_backend import run_vlm
 
@@ -92,6 +94,16 @@ def _apply_match_penalties(candidate_scores, match_analysis):
         max(0.0, float(candidate_scores["final_score"]) - penalty),
         4,
     )
+    return candidate_scores
+
+
+def _apply_semantic_judgment(candidate_scores, semantic_judgment):
+    score = float(candidate_scores.get("final_score", 0.0))
+    score += float(semantic_judgment.get("semantic_bonus", 0.0))
+    score -= float(semantic_judgment.get("contradiction_penalty", 0.0))
+    candidate_scores["semantic_bonus"] = round(float(semantic_judgment.get("semantic_bonus", 0.0)), 4)
+    candidate_scores["contradiction_penalty"] = round(float(semantic_judgment.get("contradiction_penalty", 0.0)), 4)
+    candidate_scores["final_score"] = round(float(np.clip(score, 0.0, 1.0)), 4)
     return candidate_scores
 
 
@@ -268,6 +280,8 @@ def _attribute_agent_score(parsed, attr_result):
 def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scene_result,
                      attr_result, anchor_boxes=None, anchor2_boxes=None,
                      anchor_confidence=1.0, anchor2_confidence=1.0):
+    semantic_plan = parsed.get("semantic_plan") or {}
+    query_type = semantic_plan.get("query_type", "object-centric")
     spatial_score = _compute_spatial_score(
         box_xyxy,
         parsed,
@@ -285,6 +299,7 @@ def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scen
         anchor2_info={"confidence": anchor2_confidence},
     )
     object_score = float(np.clip((det_score + clip_scores.get("object_score", det_score)) / 2.0, 0.0, 1.0))
+    detector_prompt_score = float(np.clip(clip_scores.get("detector_prompt_score", clip_scores.get("full_query_score", 0.0)), 0.0, 1.0))
     attribute_score = float(np.clip(
         max(
             clip_scores.get("attribute_score", 0.0),
@@ -296,20 +311,44 @@ def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scen
     ))
     clip_score = float(np.clip(clip_scores.get("full_query_score", 0.0), 0.0, 1.0))
 
-    final_score = (
-        object_score * 0.27 +
-        attribute_score * 0.22 +
-        clip_score * 0.20 +
-        spatial_score * 0.16 +
-        anchor_score * 0.08 +
-        scene_score * 0.04 +
-        attr_agent_score * 0.03
-    )
+    if query_type == "condition-centric":
+        final_score = (
+            object_score * 0.24 +
+            attribute_score * 0.28 +
+            clip_score * 0.24 +
+            spatial_score * 0.10 +
+            anchor_score * 0.04 +
+            scene_score * 0.04 +
+            attr_agent_score * 0.03 +
+            detector_prompt_score * 0.03
+        )
+    elif query_type == "relation-centric":
+        final_score = (
+            object_score * 0.25 +
+            attribute_score * 0.18 +
+            clip_score * 0.18 +
+            spatial_score * 0.18 +
+            anchor_score * 0.12 +
+            scene_score * 0.05 +
+            attr_agent_score * 0.04
+        )
+    else:
+        final_score = (
+            object_score * 0.27 +
+            attribute_score * 0.22 +
+            clip_score * 0.20 +
+            spatial_score * 0.16 +
+            anchor_score * 0.08 +
+            scene_score * 0.04 +
+            attr_agent_score * 0.03
+        )
 
     return {
+        "query_type": query_type,
         "object_score": round(object_score, 4),
         "attribute_score": round(attribute_score, 4),
         "clip_score": round(clip_score, 4),
+        "detector_prompt_score": round(detector_prompt_score, 4),
         "color_score": round(float(clip_scores.get("color_score", 0.0)), 4),
         "condition_score": round(float(clip_scores.get("condition_score", 0.0)), 4),
         "spatial_score": round(spatial_score, 4),
@@ -438,6 +477,13 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     # ---- Step 2.5: Advanced Query Parsing while LLaVA is still loaded ----
     parsed = llava_parse_query(user_prompt)
     parsed['attr_agent_result'] = attr_result
+    semantic_plan = build_semantic_plan(
+        user_prompt=user_prompt,
+        parsed=parsed,
+        attr_result=attr_result,
+        scene_result=scene_result,
+    )
+    parsed["semantic_plan"] = semantic_plan
 
     # ---- FREE LLaVA from GPU to make room for detection models ----
     try:
@@ -475,6 +521,14 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 )
         else:
             print(f"[i] Agent prompt rejected (template text), using parsed: '{parsed['object_prompt']}'")
+
+    if semantic_plan.get("detector_prompt"):
+        semantic_detector_prompt = str(semantic_plan["detector_prompt"]).strip()
+        is_consistent, reason = _is_prompt_consistent_with_query(parsed, semantic_detector_prompt)
+        if semantic_detector_prompt and is_consistent:
+            parsed["object_prompt"] = semantic_detector_prompt
+        else:
+            print(f"[i] Semantic controller kept detector prompt unchanged ({reason})")
 
     # ---- Step 3: Candidate Detection (GroundingDINO) ----
     print(f"[i] Running GroundingDINO with prompt: '{parsed['object_prompt']}'")
@@ -630,6 +684,13 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             )
             match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
             candidate_scores = _apply_match_penalties(candidate_scores, match_analysis)
+            semantic_judgment = judge_candidate_against_plan(
+                semantic_plan=semantic_plan,
+                parsed=parsed,
+                candidate_scores=candidate_scores,
+                clip_scores=clip_score_map,
+            )
+            candidate_scores = _apply_semantic_judgment(candidate_scores, semantic_judgment)
             candidate_details.append({
                 "index": i,
                 "label": all_labels[i],
@@ -637,6 +698,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 "clip_scores": {k: round(float(v), 4) for k, v in clip_score_map.items()},
                 "scores": candidate_scores,
                 "match_analysis": match_analysis,
+                "semantic_judgment": semantic_judgment,
                 "box_xyxy": (box.numpy() if torch.is_tensor(box) else np.array(box)).tolist(),
             })
 
@@ -662,6 +724,13 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             )
             match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
             candidate_scores = _apply_match_penalties(candidate_scores, match_analysis)
+            semantic_judgment = judge_candidate_against_plan(
+                semantic_plan=semantic_plan,
+                parsed=parsed,
+                candidate_scores=candidate_scores,
+                clip_scores={},
+            )
+            candidate_scores = _apply_semantic_judgment(candidate_scores, semantic_judgment)
             candidate_details.append({
                 "index": i,
                 "label": all_labels[i],
@@ -669,6 +738,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 "clip_scores": {},
                 "scores": candidate_scores,
                 "match_analysis": match_analysis,
+                "semantic_judgment": semantic_judgment,
                 "box_xyxy": all_boxes_xyxy[i].numpy().tolist(),
             })
 
@@ -775,6 +845,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         f"{'='*40}",
         f"Query: \"{user_prompt}\"",
         f"Detection Prompt: '{parsed['object_prompt']}'",
+        f"Semantic Query Type: {semantic_plan.get('query_type', 'unknown')}",
         f"Target Object: {parsed.get('target_object', 'unknown')}",
         f"Spatial: {parsed.get('spatial', 'None')}",
         f"Anchor Confidence: {_format_anchor_confidence(parsed, anchor_info, anchor2_info)}",
@@ -827,6 +898,12 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             )
             if candidate.get("match_analysis", {}).get("reason"):
                 summary_lines.append(f"    Match Analysis: {candidate['match_analysis']['reason']}")
+            semantic_judgment = candidate.get("semantic_judgment", {})
+            if semantic_judgment:
+                summary_lines.append(
+                    f"    Semantic Judge: mandatory_ok={semantic_judgment.get('mandatory_satisfied', [])}, "
+                    f"mandatory_fail={semantic_judgment.get('mandatory_violations', [])}"
+                )
             if candidate.get("vlm_rerank", {}).get("reason"):
                 summary_lines.append(f"    VLM: {candidate['vlm_rerank']['reason']}")
 
@@ -877,6 +954,8 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "match_state": match_state,
         "match_confidence": match_confidence,
         "priority_order": parsed.get('priority_order', []),
+        "semantic_query_type": semantic_plan.get("query_type", "unknown"),
+        "semantic_plan": semantic_plan,
         "top_candidates": [
             {
                 "candidate_index": candidate["index"] + 1,
@@ -889,6 +968,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 "reason": candidate.get("match_analysis", {}).get("reason", ""),
                 "satisfied_constraints": candidate.get("match_analysis", {}).get("satisfied_constraints", []),
                 "violated_constraints": candidate.get("match_analysis", {}).get("violated_constraints", []),
+                "semantic_judgment": candidate.get("semantic_judgment", {}),
             }
             for candidate in top_ranked
         ],
@@ -936,6 +1016,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         json.dump({
             "query": user_prompt,
             "detection_prompt": parsed['object_prompt'],
+            "semantic_plan": semantic_plan,
             "spatial": parsed.get('spatial'),
             "candidates_found": n_detected,
             "clip_verified": n_verified,
@@ -954,6 +1035,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "attr_result": attr_result,
         "parsed": parsed,
         "parsed_query": parsed,
+        "semantic_plan": semantic_plan,
         "n_detected": n_detected,
         "n_verified": n_verified,
         "n_selected": n_selected,

@@ -109,11 +109,14 @@ class CLIPVerifier:
         color = attrs.get("color")
         condition = attrs.get("condition")
         descriptors = attrs.get("descriptors") or []
+        semantic_plan = query_info.get("semantic_plan") or {}
+        query_type = semantic_plan.get("query_type", "object-centric")
 
         prompts = []
-        positive_prompt = query_info.get("object_prompt") or target_object
+        full_query_prompt = (query_info.get("full_query_prompt") or query_info.get("original") or query_info.get("object_prompt") or target_object).strip()
+        detector_prompt = (query_info.get("object_prompt") or target_object).strip()
         object_prompt = target_object
-        prompts.extend([positive_prompt, object_prompt])
+        prompts.extend([full_query_prompt, detector_prompt, object_prompt])
 
         if color and target_object:
             prompts.append(f"{color} {target_object}")
@@ -122,6 +125,7 @@ class CLIPVerifier:
 
         if condition and target_object:
             prompts.append(f"{condition} {target_object}")
+            prompts.append(f"{target_object} that is {condition}")
             negative_condition = "normal" if condition != "normal" else "damaged"
             prompts.append(f"{negative_condition} {target_object}")
 
@@ -131,16 +135,19 @@ class CLIPVerifier:
 
         scores = self.compare_prompts(image_crop, prompts)
 
-        positive_score = scores.get(positive_prompt, 0.0)
-        object_score = scores.get(object_prompt, positive_score)
-        color_score = scores.get(f"{color} {target_object}", positive_score) if color and target_object else positive_score
-        condition_score = scores.get(f"{condition} {target_object}", positive_score) if condition and target_object else positive_score
+        full_query_score = scores.get(full_query_prompt, 0.0)
+        detector_score = scores.get(detector_prompt, full_query_score)
+        object_score = scores.get(object_prompt, detector_score)
+        color_score = scores.get(f"{color} {target_object}", detector_score) if color and target_object else detector_score
+        condition_prompt_score = scores.get(f"{condition} {target_object}", detector_score) if condition and target_object else detector_score
+        condition_phrase_score = scores.get(f"{target_object} that is {condition}", condition_prompt_score) if condition and target_object else condition_prompt_score
+        condition_score = max(condition_prompt_score, condition_phrase_score)
 
         color_contrast = 0.0
         if color and target_object:
             competing = [
                 score for prompt, score in scores.items()
-                if prompt.endswith(target_object) and prompt != f"{color} {target_object}" and prompt != positive_prompt
+                if prompt.endswith(target_object) and prompt != f"{color} {target_object}" and prompt != detector_prompt
             ]
             if competing:
                 color_contrast = color_score - max(competing)
@@ -150,10 +157,16 @@ class CLIPVerifier:
             alt_prompt = f"{'normal' if condition != 'normal' else 'damaged'} {target_object}"
             condition_contrast = condition_score - scores.get(alt_prompt, 0.0)
 
+        if query_type == "condition-centric" and condition:
+            full_query_score = max(full_query_score, condition_score)
+
+        attribute_score = max(color_score, condition_score, detector_score)
+
         return {
-            "full_query_score": float(positive_score),
+            "full_query_score": float(full_query_score),
+            "detector_prompt_score": float(detector_score),
             "object_score": float(object_score),
-            "attribute_score": float(max(color_score, condition_score, positive_score)),
+            "attribute_score": float(attribute_score),
             "color_score": float(color_score),
             "condition_score": float(condition_score),
             "color_contrast": float(color_contrast),

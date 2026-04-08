@@ -23,6 +23,8 @@ def determine_match_decision(ranked_candidates):
     strongest_violations = len(top.get("match_analysis", {}).get("violated_constraints", []))
     ambiguity_penalty = float(top.get("match_analysis", {}).get("ambiguity_penalty", 0.0))
     relation_uncertainty_penalty = float(top.get("match_analysis", {}).get("relation_uncertainty_penalty", 0.0))
+    semantic_judgment = top.get("semantic_judgment", {}) or {}
+    mandatory_violations = len(semantic_judgment.get("mandatory_violations", []))
     # `final_score` already includes ambiguity / relation penalties from the
     # ranking stage, so use it directly here to keep ranking and confidence in
     # sync.
@@ -36,7 +38,7 @@ def determine_match_decision(ranked_candidates):
             "reason": "The best candidate remained too weak to trust.",
         }
 
-    if effective_confidence >= 0.72 and margin >= 0.12 and strongest_violations == 0:
+    if effective_confidence >= 0.72 and margin >= 0.12 and strongest_violations == 0 and mandatory_violations == 0:
         return {
             "state": "exact_match",
             "confidence": round(effective_confidence, 4),
@@ -44,7 +46,17 @@ def determine_match_decision(ranked_candidates):
             "reason": "One candidate clearly satisfied the full-query constraints.",
         }
 
-    if len(ranked_candidates) > 1 and (margin <= 0.06 or ambiguity_penalty >= 0.08 or relation_uncertainty_penalty >= 0.06):
+    if mandatory_violations > 0 and effective_confidence < 0.55:
+        return {
+            "state": "no_reliable_match",
+            "confidence": round(effective_confidence, 4),
+            "selected_indices": [],
+            "reason": "Top candidates still violated mandatory query constraints.",
+        }
+
+    if len(ranked_candidates) > 1 and (
+        margin <= 0.06 or ambiguity_penalty >= 0.08 or relation_uncertainty_penalty >= 0.06 or mandatory_violations > 0
+    ):
         selected = [ranked_candidates[0]["index"], ranked_candidates[1]["index"]]
         return {
             "state": "ambiguous_match",
