@@ -69,12 +69,14 @@ def build_semantic_plan(user_prompt: str, parsed: dict, attr_result: dict | None
     if ordinal:
         preferred.append(_make_constraint("ordinal", str(ordinal), "preferred"))
 
-    # Keep detector prompting conservative, but preserve semantics for ranking.
+    # Keep detector prompting conservative, but preserve the strongest semantic
+    # cues for condition-heavy queries so the detector phrase does not collapse
+    # to a generic object label.
     detector_prompt_parts = []
-    if color and query_type != "condition-centric":
-        detector_prompt_parts.append(color)
-    if condition and query_type == "condition-centric":
+    if condition:
         detector_prompt_parts.append(condition)
+    if color:
+        detector_prompt_parts.append(color)
     if target_object:
         detector_prompt_parts.append(target_object)
     detector_prompt = " ".join(part for part in detector_prompt_parts if part).strip() or parsed.get("object_prompt") or user_prompt

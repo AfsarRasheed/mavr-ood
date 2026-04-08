@@ -52,6 +52,8 @@ def reasoning_agent(pipeline_data):
     top_candidates = pipeline_data.get("top_candidates", [])
     semantic_query_type = pipeline_data.get("semantic_query_type", "unknown")
     semantic_plan = pipeline_data.get("semantic_plan", {})
+    if match_state in {"no_reliable_match", "ambiguous_match"}:
+        return _fallback_reasoning(pipeline_data)
 
     context = f"""A multi-agent vision-language detection pipeline processed a road scene image with the following results:
 
@@ -102,6 +104,8 @@ Write as a single cohesive paragraph. Be specific and reference the actual numbe
 def _fallback_reasoning(data):
     """Rule-based fallback if LLaVA fails."""
     parts = []
+    match_state = data.get('match_state', 'unknown')
+    match_confidence = data.get('match_confidence', 0.0)
     parts.append(
         f"The system analyzed a {data.get('scene_type', 'road')} scene "
         f"with {data.get('lighting', 'unknown')} lighting and identified "
@@ -122,13 +126,24 @@ def _fallback_reasoning(data):
             f"low visual similarity."
         )
     spatial = data.get('spatial_term', 'none')
-    if spatial and spatial != 'none':
+    if spatial and spatial != 'none' and match_state not in {'no_reliable_match', 'ambiguous_match'}:
         parts.append(
             f"The spatial filter '{spatial}' selected "
             f"{data.get('n_selected', 0)} object(s) as the final detection."
         )
-    parts.append(
-        f"The final decision state was {data.get('match_state', 'unknown')} "
-        f"with confidence {data.get('match_confidence', 0.0):.3f}."
-    )
+    if match_state == "no_reliable_match":
+        parts.append(
+            f"The final decision state was no reliable match with confidence {match_confidence:.3f}, "
+            f"so the pipeline found candidate evidence but could not trust any candidate as a valid grounding."
+        )
+    elif match_state == "ambiguous_match":
+        parts.append(
+            f"The final decision state was ambiguous match with confidence {match_confidence:.3f}, "
+            f"meaning multiple candidates remained plausible and the system could not justify a single exact selection."
+        )
+    else:
+        parts.append(
+            f"The final decision state was {match_state} "
+            f"with confidence {match_confidence:.3f}."
+        )
     return " ".join(parts)

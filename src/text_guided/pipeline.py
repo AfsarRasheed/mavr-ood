@@ -51,14 +51,20 @@ def _normalize_prompt_tokens(text):
 def _is_prompt_consistent_with_query(parsed, prompt_text):
     tokens = _normalize_prompt_tokens(prompt_text)
     attrs = parsed.get("attributes") or {}
+    semantic_plan = parsed.get("semantic_plan") or {}
     target_object = str(parsed.get("target_object") or "").lower().strip()
     color = str(attrs.get("color") or "").lower().strip()
     condition = str(attrs.get("condition") or "").lower().strip()
+    mandatory_kinds = {item.get("kind") for item in semantic_plan.get("mandatory_constraints", [])}
 
     if target_object and target_object not in tokens:
         return False, f"missing target object '{target_object}'"
 
     if color:
+        if "color" in mandatory_kinds and color not in tokens:
+            gray_family = {"grey", "gray", "silver"}
+            if not (color in gray_family and tokens.intersection(gray_family)):
+                return False, f"missing mandatory color '{color}'"
         competing_colors = {
             token for token in tokens
             if token in {"red", "blue", "green", "yellow", "white", "black", "grey", "gray", "silver",
@@ -73,6 +79,8 @@ def _is_prompt_consistent_with_query(parsed, prompt_text):
             return False, f"conflicts with color '{color}'"
 
     if condition:
+        if "condition" in mandatory_kinds and condition not in tokens:
+            return False, f"missing mandatory condition '{condition}'"
         competing_conditions = {
             token for token in tokens
             if token in {"damaged", "broken", "burning", "parked", "moving", "stopped", "crashed",
