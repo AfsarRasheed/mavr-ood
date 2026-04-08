@@ -12,7 +12,7 @@ import torch
 
 from src.text_guided.scene_agent import scene_understanding
 from src.text_guided.attribute_agent import attribute_matching_agent
-from src.text_guided.query_parser import parse_query, llava_parse_query, spatial_filter
+from src.text_guided.query_parser import llava_parse_query
 from src.text_guided.visualizer import generate_step_visualizations
 from src.text_guided.reasoning_agent import reasoning_agent
 from src.text_guided.candidate_reasoner import summarize_candidate_match
@@ -40,6 +40,69 @@ def _safe_crop(image_np, box_xyxy):
     return PILImage.fromarray(crop)
 
 
+def _normalize_prompt_tokens(text):
+    import re
+
+    return set(re.findall(r"[a-zA-Z][a-zA-Z\-]*", str(text or "").lower()))
+
+
+def _is_prompt_consistent_with_query(parsed, prompt_text):
+    tokens = _normalize_prompt_tokens(prompt_text)
+    attrs = parsed.get("attributes") or {}
+    target_object = str(parsed.get("target_object") or "").lower().strip()
+    color = str(attrs.get("color") or "").lower().strip()
+    condition = str(attrs.get("condition") or "").lower().strip()
+
+    if target_object and target_object not in tokens:
+        return False, f"missing target object '{target_object}'"
+
+    if color:
+        competing_colors = {
+            token for token in tokens
+            if token in {"red", "blue", "green", "yellow", "white", "black", "grey", "gray", "silver",
+                         "brown", "orange", "purple", "pink", "gold", "dark", "light", "bright",
+                         "beige", "maroon", "navy", "cyan", "teal"}
+            and token != color
+        }
+        gray_family = {"grey", "gray", "silver"}
+        if color in gray_family:
+            competing_colors = {token for token in competing_colors if token not in gray_family}
+        if competing_colors:
+            return False, f"conflicts with color '{color}'"
+
+    if condition:
+        competing_conditions = {
+            token for token in tokens
+            if token in {"damaged", "broken", "burning", "parked", "moving", "stopped", "crashed",
+                         "overturned", "tilted", "fallen", "open", "closed", "old", "new",
+                         "dirty", "clean", "blurred"}
+            and token != condition
+        }
+        if competing_conditions:
+            return False, f"conflicts with condition '{condition}'"
+
+    return True, "consistent with parsed query"
+
+
+def _apply_match_penalties(candidate_scores, match_analysis):
+    penalty = float(match_analysis.get("ambiguity_penalty", 0.0)) + float(
+        match_analysis.get("relation_uncertainty_penalty", 0.0)
+    )
+    candidate_scores["final_score"] = round(
+        max(0.0, float(candidate_scores["final_score"]) - penalty),
+        4,
+    )
+    return candidate_scores
+
+
+def _format_anchor_confidence(parsed, anchor_info=None, anchor2_info=None):
+    if parsed.get("spatial") == "between":
+        conf1 = float((anchor_info or {}).get("confidence", 0.0))
+        conf2 = float((anchor2_info or {}).get("confidence", 0.0))
+        return f"{conf1:.3f}, {conf2:.3f}"
+    return f"{float((anchor_info or {}).get('confidence', 0.0 if parsed.get('anchor') else 1.0)):.3f}"
+
+
 def _run_anchor_detection(gdino_model, image_tensor_dev, anchor_text, H, W, threshold=0.25):
     anchor_caption = anchor_text.lower().strip()
     if not anchor_caption.endswith("."):
@@ -54,17 +117,29 @@ def _run_anchor_detection(gdino_model, image_tensor_dev, anchor_text, H, W, thre
     anchor_boxes_cxcywh = anchor_boxes_raw[anchor_filt]
 
     if len(anchor_boxes_cxcywh) == 0:
-        return None
+        return {
+            "boxes": None,
+            "confidence": 0.0,
+            "count": 0,
+            "label": anchor_text,
+        }
 
     anchor_xyxy = torch.zeros_like(anchor_boxes_cxcywh)
     anchor_xyxy[:, 0] = (anchor_boxes_cxcywh[:, 0] - anchor_boxes_cxcywh[:, 2] / 2) * W
     anchor_xyxy[:, 1] = (anchor_boxes_cxcywh[:, 1] - anchor_boxes_cxcywh[:, 3] / 2) * H
     anchor_xyxy[:, 2] = (anchor_boxes_cxcywh[:, 0] + anchor_boxes_cxcywh[:, 2] / 2) * W
     anchor_xyxy[:, 3] = (anchor_boxes_cxcywh[:, 1] + anchor_boxes_cxcywh[:, 3] / 2) * H
-    return anchor_xyxy
+    anchor_confidence = float(anchor_logits[anchor_filt].max(dim=1)[0].max().item()) if anchor_filt.any() else 0.0
+    return {
+        "boxes": anchor_xyxy,
+        "confidence": round(anchor_confidence, 4),
+        "count": int(len(anchor_boxes_cxcywh)),
+        "label": anchor_text,
+    }
 
 
-def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anchor2_boxes=None):
+def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anchor2_boxes=None,
+                           anchor_confidence=1.0, anchor2_confidence=1.0):
     H, W = image_shape
     box = np.array(box_xyxy, dtype=np.float32)
     center = _box_center(box)
@@ -96,32 +171,56 @@ def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anc
     if spatial == "farthest":
         return float(np.clip(1.0 - y_norm, 0.0, 1.0))
 
+    is_relational = spatial in ("next_to", "behind", "in_front", "above", "below", "between")
+    if is_relational and anchor_boxes is None:
+        return 0.15
+
     if anchor_boxes is not None and len(anchor_boxes) > 0:
         anchor = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
         anchor_center = _box_center(anchor[0])
         dx = abs(center[0] - anchor_center[0]) / max(W, 1)
         dy = abs(center[1] - anchor_center[1]) / max(H, 1)
         dist = float(np.sqrt(dx ** 2 + dy ** 2))
+        confidence_scale = 0.55 + 0.45 * float(np.clip(anchor_confidence, 0.0, 1.0))
 
         if spatial == "next_to":
-            return float(np.clip(1.0 - dist * 1.5, 0.0, 1.0))
+            return float(np.clip((1.0 - dist * 1.5) * confidence_scale, 0.0, 1.0))
         if spatial == "behind":
-            return float(np.clip((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+            return float(np.clip(((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5) * confidence_scale, 0.0, 1.0))
         if spatial == "in_front":
-            return float(np.clip((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+            return float(np.clip(((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5) * confidence_scale, 0.0, 1.0))
         if spatial == "above":
-            return float(np.clip((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+            return float(np.clip(((anchor_center[1] - center[1]) / max(H * 0.5, 1.0) + 0.5) * confidence_scale, 0.0, 1.0))
         if spatial == "below":
-            return float(np.clip((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5, 0.0, 1.0))
+            return float(np.clip(((center[1] - anchor_center[1]) / max(H * 0.5, 1.0) + 0.5) * confidence_scale, 0.0, 1.0))
 
     if spatial == "between" and anchor_boxes is not None and anchor2_boxes is not None and len(anchor_boxes) > 0 and len(anchor2_boxes) > 0:
         anchor1 = anchor_boxes.numpy() if torch.is_tensor(anchor_boxes) else np.array(anchor_boxes)
         anchor2 = anchor2_boxes.numpy() if torch.is_tensor(anchor2_boxes) else np.array(anchor2_boxes)
         midpoint = (_box_center(anchor1[0]) + _box_center(anchor2[0])) / 2.0
         dist = np.linalg.norm((center - midpoint) / np.array([max(W, 1), max(H, 1)], dtype=np.float32))
-        return float(np.clip(1.0 - dist * 2.0, 0.0, 1.0))
+        confidence_scale = 0.45 + 0.55 * min(
+            float(np.clip(anchor_confidence, 0.0, 1.0)),
+            float(np.clip(anchor2_confidence, 0.0, 1.0)),
+        )
+        return float(np.clip((1.0 - dist * 2.0) * confidence_scale, 0.0, 1.0))
 
     return 0.45
+
+
+def _compute_anchor_confidence(parsed, anchor_info=None, anchor2_info=None):
+    spatial = parsed.get("spatial")
+    if spatial not in ("next_to", "behind", "in_front", "above", "below", "between"):
+        return 1.0
+
+    if spatial == "between":
+        conf1 = float((anchor_info or {}).get("confidence", 0.0))
+        conf2 = float((anchor2_info or {}).get("confidence", 0.0))
+        if conf1 <= 0.0 or conf2 <= 0.0:
+            return 0.0
+        return round(min(conf1, conf2), 4)
+
+    return round(float((anchor_info or {}).get("confidence", 0.0)), 4)
 
 
 def _scene_consistency_score(parsed, scene_result):
@@ -167,16 +266,24 @@ def _attribute_agent_score(parsed, attr_result):
 
 
 def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scene_result,
-                     attr_result, anchor_boxes=None, anchor2_boxes=None):
+                     attr_result, anchor_boxes=None, anchor2_boxes=None,
+                     anchor_confidence=1.0, anchor2_confidence=1.0):
     spatial_score = _compute_spatial_score(
         box_xyxy,
         parsed,
         image_shape=image_shape,
         anchor_boxes=anchor_boxes,
         anchor2_boxes=anchor2_boxes,
+        anchor_confidence=anchor_confidence,
+        anchor2_confidence=anchor2_confidence,
     )
     scene_score = _scene_consistency_score(parsed, scene_result)
     attr_agent_score = _attribute_agent_score(parsed, attr_result)
+    anchor_score = _compute_anchor_confidence(
+        parsed,
+        anchor_info={"confidence": anchor_confidence},
+        anchor2_info={"confidence": anchor2_confidence},
+    )
     object_score = float(np.clip((det_score + clip_scores.get("object_score", det_score)) / 2.0, 0.0, 1.0))
     attribute_score = float(np.clip(
         max(
@@ -190,19 +297,23 @@ def _score_candidate(box_xyxy, det_score, clip_scores, parsed, image_shape, scen
     clip_score = float(np.clip(clip_scores.get("full_query_score", 0.0), 0.0, 1.0))
 
     final_score = (
-        object_score * 0.28 +
+        object_score * 0.27 +
         attribute_score * 0.22 +
         clip_score * 0.20 +
-        spatial_score * 0.18 +
-        scene_score * 0.06 +
-        attr_agent_score * 0.06
+        spatial_score * 0.16 +
+        anchor_score * 0.08 +
+        scene_score * 0.04 +
+        attr_agent_score * 0.03
     )
 
     return {
         "object_score": round(object_score, 4),
         "attribute_score": round(attribute_score, 4),
         "clip_score": round(clip_score, 4),
+        "color_score": round(float(clip_scores.get("color_score", 0.0)), 4),
+        "condition_score": round(float(clip_scores.get("condition_score", 0.0)), 4),
         "spatial_score": round(spatial_score, 4),
+        "anchor_confidence_score": round(anchor_score, 4),
         "scene_consistency_score": round(scene_score, 4),
         "attribute_agent_score": round(attr_agent_score, 4),
         "color_contrast": round(float(clip_scores.get("color_contrast", 0.0)), 4),
@@ -345,15 +456,23 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         gc.collect()
         torch.cuda.empty_cache()
 
-    # If agent recommended a better prompt, use it (but validate it)
+    # If the attribute agent suggests a detector prompt, only accept it when it
+    # stays consistent with the parsed user intent.
     if isinstance(attr_result, dict) and attr_result.get('recommended_prompt'):
         agent_prompt = attr_result['recommended_prompt'].strip()
         # Reject if it looks like template text (LLaVA sometimes copies the template)
         bad_keywords = ['groundingdino', 'optimized', 'detection prompt', 'example', 'template']
         is_template = any(kw in agent_prompt.lower() for kw in bad_keywords)
         if agent_prompt and len(agent_prompt) > 2 and not is_template:
-            print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
-            parsed['object_prompt'] = agent_prompt
+            is_consistent, reason = _is_prompt_consistent_with_query(parsed, agent_prompt)
+            if is_consistent:
+                print(f"[i] Using agent's recommended prompt: '{agent_prompt}'")
+                parsed['object_prompt'] = agent_prompt
+            else:
+                print(
+                    f"[i] Agent prompt rejected ({reason}), using parsed: "
+                    f"'{parsed['object_prompt']}'"
+                )
         else:
             print(f"[i] Agent prompt rejected (template text), using parsed: '{parsed['object_prompt']}'")
 
@@ -445,14 +564,19 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     candidate_details = []
     selected_idx = None
     anchor_boxes = None
+    anchor_info = None
 
     # Detect anchor (reference) object if relational query
     if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below', 'between'):
         print(f"[i] Detecting anchor object: '{parsed['anchor']}'...")
         try:
-            anchor_boxes = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor'], H, W)
+            anchor_info = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor'], H, W)
+            anchor_boxes = anchor_info.get("boxes")
             if anchor_boxes is not None and len(anchor_boxes) > 0:
-                print(f"[OK] Found {len(anchor_boxes)} anchor object(s): '{parsed['anchor']}'")
+                print(
+                    f"[OK] Found {len(anchor_boxes)} anchor object(s): '{parsed['anchor']}' "
+                    f"(confidence={anchor_info.get('confidence', 0.0):.2f})"
+                )
             else:
                 print(f"[WARN] Anchor object '{parsed['anchor']}' not found, falling back to closest")
         except Exception as e:
@@ -460,12 +584,17 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     # Detect second anchor for "between" queries
     anchor2_boxes = None
+    anchor2_info = None
     if parsed.get('anchor2') and parsed.get('spatial') == 'between':
         print(f"[i] Detecting second anchor object: '{parsed['anchor2']}'...")
         try:
-            anchor2_boxes = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor2'], H, W)
+            anchor2_info = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor2'], H, W)
+            anchor2_boxes = anchor2_info.get("boxes")
             if anchor2_boxes is not None and len(anchor2_boxes) > 0:
-                print(f"[OK] Found {len(anchor2_boxes)} second anchor(s): '{parsed['anchor2']}'")
+                print(
+                    f"[OK] Found {len(anchor2_boxes)} second anchor(s): '{parsed['anchor2']}' "
+                    f"(confidence={anchor2_info.get('confidence', 0.0):.2f})"
+                )
             else:
                 print(f"[WARN] Second anchor '{parsed['anchor2']}' not found")
         except Exception as e:
@@ -496,12 +625,11 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 attr_result=attr_result,
                 anchor_boxes=anchor_boxes,
                 anchor2_boxes=anchor2_boxes,
+                anchor_confidence=float((anchor_info or {}).get("confidence", 0.0 if parsed.get('anchor') else 1.0)),
+                anchor2_confidence=float((anchor2_info or {}).get("confidence", 0.0 if parsed.get('anchor2') else 1.0)),
             )
             match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
-            candidate_scores["final_score"] = round(
-                max(0.0, float(candidate_scores["final_score"]) - float(match_analysis["ambiguity_penalty"])),
-                4,
-            )
+            candidate_scores = _apply_match_penalties(candidate_scores, match_analysis)
             candidate_details.append({
                 "index": i,
                 "label": all_labels[i],
@@ -529,12 +657,11 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 attr_result=attr_result,
                 anchor_boxes=anchor_boxes,
                 anchor2_boxes=anchor2_boxes,
+                anchor_confidence=float((anchor_info or {}).get("confidence", 0.0 if parsed.get('anchor') else 1.0)),
+                anchor2_confidence=float((anchor2_info or {}).get("confidence", 0.0 if parsed.get('anchor2') else 1.0)),
             )
             match_analysis = summarize_candidate_match(parsed, candidate_scores, attr_result)
-            candidate_scores["final_score"] = round(
-                max(0.0, float(candidate_scores["final_score"]) - float(match_analysis["ambiguity_penalty"])),
-                4,
-            )
+            candidate_scores = _apply_match_penalties(candidate_scores, match_analysis)
             candidate_details.append({
                 "index": i,
                 "label": all_labels[i],
@@ -650,6 +777,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         f"Detection Prompt: '{parsed['object_prompt']}'",
         f"Target Object: {parsed.get('target_object', 'unknown')}",
         f"Spatial: {parsed.get('spatial', 'None')}",
+        f"Anchor Confidence: {_format_anchor_confidence(parsed, anchor_info, anchor2_info)}",
         f"Priority Order: {', '.join(parsed.get('priority_order', []))}",
         f"Match State: {match_state}",
         f"Match Confidence: {match_confidence:.3f}",
@@ -695,7 +823,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 f"  Rank {rank} -> candidate #{candidate['index'] + 1}: "
                 f"final={scores['final_score']:.3f}, object={scores['object_score']:.3f}, "
                 f"attribute={scores['attribute_score']:.3f}, clip={scores['clip_score']:.3f}, "
-                f"spatial={scores['spatial_score']:.3f}"
+                f"spatial={scores['spatial_score']:.3f}, anchor={scores.get('anchor_confidence_score', 1.0):.3f}"
             )
             if candidate.get("match_analysis", {}).get("reason"):
                 summary_lines.append(f"    Match Analysis: {candidate['match_analysis']['reason']}")
@@ -757,6 +885,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
                 "attribute_score": candidate["scores"]["attribute_score"],
                 "clip_score": candidate["scores"]["clip_score"],
                 "spatial_score": candidate["scores"]["spatial_score"],
+                "anchor_confidence_score": candidate["scores"].get("anchor_confidence_score", 1.0),
                 "reason": candidate.get("match_analysis", {}).get("reason", ""),
                 "satisfied_constraints": candidate.get("match_analysis", {}).get("satisfied_constraints", []),
                 "violated_constraints": candidate.get("match_analysis", {}).get("violated_constraints", []),

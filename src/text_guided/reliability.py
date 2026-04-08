@@ -22,7 +22,11 @@ def determine_match_decision(ranked_candidates):
 
     strongest_violations = len(top.get("match_analysis", {}).get("violated_constraints", []))
     ambiguity_penalty = float(top.get("match_analysis", {}).get("ambiguity_penalty", 0.0))
-    effective_confidence = max(0.0, top_score - ambiguity_penalty)
+    relation_uncertainty_penalty = float(top.get("match_analysis", {}).get("relation_uncertainty_penalty", 0.0))
+    # `final_score` already includes ambiguity / relation penalties from the
+    # ranking stage, so use it directly here to keep ranking and confidence in
+    # sync.
+    effective_confidence = max(0.0, top_score)
 
     if effective_confidence < 0.35:
         return {
@@ -40,7 +44,7 @@ def determine_match_decision(ranked_candidates):
             "reason": "One candidate clearly satisfied the full-query constraints.",
         }
 
-    if len(ranked_candidates) > 1 and (margin <= 0.06 or ambiguity_penalty >= 0.08):
+    if len(ranked_candidates) > 1 and (margin <= 0.06 or ambiguity_penalty >= 0.08 or relation_uncertainty_penalty >= 0.06):
         selected = [ranked_candidates[0]["index"], ranked_candidates[1]["index"]]
         return {
             "state": "ambiguous_match",
