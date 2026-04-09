@@ -337,7 +337,7 @@ function renderGroundingDecision(data) {
         renderLine('Result State', formatResultState(data.match_state)),
         renderLine('Confidence', formatConfidence(data.match_confidence)),
         renderLine('Reason', escapeHtml(data.match_reason || '')),
-        renderLine('Grounding Backend', escapeHtml(data.grounding_backend || parsed.grounding_backend || 'gdino')),
+        renderLine('Grounding Backend', escapeHtml(data.grounding_backend || parsed.grounding_backend || 'florence2')),
         renderLine('Target Object', escapeHtml(parsed.target_object || parsed.object_prompt || '')),
         renderLine('Detector Prompt', escapeHtml(parsed.object_prompt || '')),
         renderLine('Spatial Constraint', escapeHtml(parsed.spatial || 'none')),

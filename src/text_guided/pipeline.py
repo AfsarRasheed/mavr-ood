@@ -20,7 +20,6 @@ from src.text_guided.candidate_reasoner import summarize_candidate_match
 from src.text_guided.semantic_controller import build_semantic_plan
 from src.text_guided.candidate_judge import judge_candidate_against_plan
 from src.text_guided.reliability import determine_match_decision
-from src.text_guided.candidate_adapter import cxcywh_normalized_to_xyxy
 from src.text_guided.florence2_backend import run_florence2_grounding
 from src.agents.vlm_backend import run_vlm
 
@@ -126,130 +125,31 @@ def _format_anchor_confidence(parsed, anchor_info=None, anchor2_info=None):
     return f"{float((anchor_info or {}).get('confidence', 0.0 if parsed.get('anchor') else 1.0)):.3f}"
 
 
-def _run_anchor_detection(gdino_model, image_tensor_dev, anchor_text, H, W, threshold=0.25):
-    anchor_caption = anchor_text.lower().strip()
-    if not anchor_caption.endswith("."):
-        anchor_caption += "."
-
-    with torch.no_grad():
-        anchor_outputs = gdino_model(image_tensor_dev[None], captions=[anchor_caption])
-
-    anchor_logits = anchor_outputs["pred_logits"].cpu().sigmoid()[0]
-    anchor_boxes_raw = anchor_outputs["pred_boxes"].cpu()[0]
-    anchor_filt = anchor_logits.max(dim=1)[0] > threshold
-    anchor_boxes_cxcywh = anchor_boxes_raw[anchor_filt]
-
-    if len(anchor_boxes_cxcywh) == 0:
-        return {
-            "boxes": None,
-            "confidence": 0.0,
-            "count": 0,
-            "label": anchor_text,
-        }
-
-    anchor_xyxy = torch.zeros_like(anchor_boxes_cxcywh)
-    anchor_xyxy[:, 0] = (anchor_boxes_cxcywh[:, 0] - anchor_boxes_cxcywh[:, 2] / 2) * W
-    anchor_xyxy[:, 1] = (anchor_boxes_cxcywh[:, 1] - anchor_boxes_cxcywh[:, 3] / 2) * H
-    anchor_xyxy[:, 2] = (anchor_boxes_cxcywh[:, 0] + anchor_boxes_cxcywh[:, 2] / 2) * W
-    anchor_xyxy[:, 3] = (anchor_boxes_cxcywh[:, 1] + anchor_boxes_cxcywh[:, 3] / 2) * H
-    anchor_confidence = float(anchor_logits[anchor_filt].max(dim=1)[0].max().item()) if anchor_filt.any() else 0.0
-    return {
-        "boxes": anchor_xyxy,
-        "confidence": round(anchor_confidence, 4),
-        "count": int(len(anchor_boxes_cxcywh)),
-        "label": anchor_text,
-    }
-
-
-def _resolve_text_guided_backend(requested_backend, florence2_backend):
-    backend = str(requested_backend or os.getenv("TEXT_GUIDED_BACKEND", "florence2")).strip().lower()
-    if backend not in {"gdino", "florence2"}:
-        print(f"[WARN] Unknown TEXT_GUIDED_BACKEND='{backend}', falling back to gdino")
-        return "gdino"
-    if backend == "florence2" and not florence2_backend:
-        print("[WARN] Florence-2 backend requested but not loaded, falling back to gdino")
-        return "gdino"
-    return backend
-
-
-def _run_gdino_candidate_proposal(gdino_model, image_tensor_dev, prompt, image_size, box_threshold):
-    from groundingdino.util.utils import get_phrases_from_posmap
-
-    height, width = image_size
-    caption = prompt.lower().strip()
-    if not caption.endswith("."):
-        caption += "."
-
-    with torch.no_grad():
-        outputs = gdino_model(image_tensor_dev[None], captions=[caption])
-
-    logits = outputs["pred_logits"].cpu().sigmoid()[0]
-    boxes_cxcywh = outputs["pred_boxes"].cpu()[0]
-    filt_mask = logits.max(dim=1)[0] > box_threshold
-    logits_filt = logits[filt_mask]
-    boxes_filt = boxes_cxcywh[filt_mask]
-
-    tokenizer = gdino_model.tokenizer
-    tokenized = tokenizer(caption)
-
-    labels = []
-    scores = []
-    for logit in logits_filt:
-        pred_phrase = get_phrases_from_posmap(logit > 0.25, tokenized, tokenizer)
-        score = float(logit.max().item())
-        labels.append(f"{pred_phrase}({score:.2f})")
-        scores.append(score)
-
-    return {
-        "backend": "gdino",
-        "prompt_used": prompt,
-        "boxes_cxcywh": boxes_filt,
-        "boxes_xyxy": cxcywh_normalized_to_xyxy(boxes_filt, (height, width)),
-        "labels": labels,
-        "scores": scores,
-        "raw_response": outputs,
-    }
-
-
 def _run_text_guided_candidate_proposal(
     *,
-    backend_name,
-    gdino_model,
     florence2_backend,
     image_pil,
-    image_tensor_dev,
     parsed,
     image_size,
-    box_threshold,
 ):
     prompt = parsed["object_prompt"]
-
-    if backend_name == "florence2":
-        florence_result = run_florence2_grounding(
-            florence_model=florence2_backend["model"],
-            florence_processor=florence2_backend["processor"],
-            image_pil=image_pil,
-            prompt=prompt,
-            device=florence2_backend["device"],
-            image_size=image_size,
-        )
-        return {
-            "backend": "florence2",
-            "prompt_used": prompt,
-            "boxes_cxcywh": florence_result["boxes_cxcywh"],
-            "boxes_xyxy": florence_result["boxes_xyxy"],
-            "labels": florence_result["labels"],
-            "scores": florence_result["scores"],
-            "raw_response": florence_result["raw_response"],
-        }
-
-    return _run_gdino_candidate_proposal(
-        gdino_model=gdino_model,
-        image_tensor_dev=image_tensor_dev,
+    florence_result = run_florence2_grounding(
+        florence_model=florence2_backend["model"],
+        florence_processor=florence2_backend["processor"],
+        image_pil=image_pil,
         prompt=prompt,
+        device=florence2_backend["device"],
         image_size=image_size,
-        box_threshold=box_threshold,
     )
+    return {
+        "backend": "florence2",
+        "prompt_used": prompt,
+        "boxes_cxcywh": florence_result["boxes_cxcywh"],
+        "boxes_xyxy": florence_result["boxes_xyxy"],
+        "labels": florence_result["labels"],
+        "scores": florence_result["scores"],
+        "raw_response": florence_result["raw_response"],
+    }
 
 
 def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anchor2_boxes=None,
@@ -536,10 +436,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         image_np: numpy RGB image (H, W, 3)
         user_prompt: user's text query e.g. "the grey car on the left"
         image_path: path to image file (for LLaVA scene analysis)
-        gdino_model: loaded GroundingDINO model
+        gdino_model: retained for backward compatibility; unused in Florence-only text-guided mode
         sam_predictor: loaded SAM predictor
         clip_verifier: loaded CLIP verifier
-        box_threshold: GroundingDINO confidence threshold
+        box_threshold: retained for backward compatibility; unused in Florence-only text-guided mode
         clip_threshold: CLIP similarity threshold
         precomputed_scene: pre-computed scene result (skip LLaVA call 1)
         precomputed_attr: pre-computed attribute result (skip LLaVA call 2)
@@ -553,8 +453,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             selected_idx: selected box indices
             summary: text summary of results
     """
-    import groundingdino.datasets.transforms as T
-
     H, W = image_np.shape[:2]
 
     print(f"\n{'='*60}")
@@ -632,31 +530,22 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         else:
             print(f"[i] Semantic controller kept detector prompt unchanged ({reason})")
 
-    grounding_backend = _resolve_text_guided_backend(text_guided_backend, florence2_backend)
+    grounding_backend = "florence2"
+    if florence2_backend is None:
+        raise RuntimeError(
+            "This Florence branch requires Florence-2 for text-guided detection, but the Florence-2 model is not loaded."
+        )
 
     # ---- Step 3: Candidate Detection / Grounding ----
     print(f"[i] Running {grounding_backend} grounding with prompt: '{parsed['object_prompt']}'")
 
     image_pil = PILImage.fromarray(image_np)
-    transform = T.Compose([
-        T.RandomResize([800], max_size=1333),
-        T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
-    image_tensor, _ = transform(image_pil, None)
-
-    device = next(gdino_model.parameters()).device
-    image_tensor_dev = image_tensor.to(device)
 
     candidate_output = _run_text_guided_candidate_proposal(
-        backend_name=grounding_backend,
-        gdino_model=gdino_model,
         florence2_backend=florence2_backend,
         image_pil=image_pil,
-        image_tensor_dev=image_tensor_dev,
         parsed=parsed,
         image_size=(H, W),
-        box_threshold=box_threshold,
     )
     boxes_filt = candidate_output["boxes_cxcywh"]
     all_boxes_xyxy = candidate_output["boxes_xyxy"]
@@ -666,7 +555,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     print(f"[OK] {grounding_backend} found {len(boxes_filt)} candidates")
 
     # ---- Retry logic if 0 candidates found ----
-    if grounding_backend == "gdino" and len(boxes_filt) == 0:
+    if False and grounding_backend == "gdino" and len(boxes_filt) == 0:
         # Retry 1: lower threshold
         retry_threshold = 0.20
         print(f"[WARN] 0 candidates — retrying with lower threshold ({retry_threshold})...")
@@ -683,7 +572,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         all_det_scores = candidate_output["scores"]
         print(f"[i] Retry 1: {len(boxes_filt)} candidates at threshold {retry_threshold}")
 
-    if grounding_backend == "gdino" and len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
+    if False and grounding_backend == "gdino" and len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
         # Retry 2: use raw user prompt
         raw_prompt = user_prompt.lower().strip()
         raw_caption = raw_prompt
@@ -712,37 +601,13 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     # Detect anchor (reference) object if relational query
     if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below', 'between'):
-        print(f"[i] Detecting anchor object: '{parsed['anchor']}'...")
-        try:
-            anchor_info = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor'], H, W)
-            anchor_boxes = anchor_info.get("boxes")
-            if anchor_boxes is not None and len(anchor_boxes) > 0:
-                print(
-                    f"[OK] Found {len(anchor_boxes)} anchor object(s): '{parsed['anchor']}' "
-                    f"(confidence={anchor_info.get('confidence', 0.0):.2f})"
-                )
-            else:
-                print(f"[WARN] Anchor object '{parsed['anchor']}' not found, falling back to closest")
-        except Exception as e:
-            print(f"[WARN] Anchor detection failed: {e}")
+        print("[i] Florence-only text-guided mode is active; legacy GDINO anchor detection is disabled.")
 
     # Detect second anchor for "between" queries
     anchor2_boxes = None
     anchor2_info = None
     if parsed.get('anchor2') and parsed.get('spatial') == 'between':
-        print(f"[i] Detecting second anchor object: '{parsed['anchor2']}'...")
-        try:
-            anchor2_info = _run_anchor_detection(gdino_model, image_tensor_dev, parsed['anchor2'], H, W)
-            anchor2_boxes = anchor2_info.get("boxes")
-            if anchor2_boxes is not None and len(anchor2_boxes) > 0:
-                print(
-                    f"[OK] Found {len(anchor2_boxes)} second anchor(s): '{parsed['anchor2']}' "
-                    f"(confidence={anchor2_info.get('confidence', 0.0):.2f})"
-                )
-            else:
-                print(f"[WARN] Second anchor '{parsed['anchor2']}' not found")
-        except Exception as e:
-            print(f"[WARN] Second anchor detection failed: {e}")
+        print("[i] Florence-only text-guided mode is active; second-anchor GDINO detection is disabled.")
 
     if len(boxes_filt) > 0 and clip_verifier is not None:
         print(f"[i] Running CLIP verification + natural-language candidate scoring (threshold={clip_threshold})...")
