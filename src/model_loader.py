@@ -68,6 +68,40 @@ _clip_verifier = None
 _florence2_bundle = None
 
 
+def _ensure_florence2_generation_config(model):
+    """
+    Florence-2 remote code can expect generation/config attributes that may be
+    absent in some Colab package combinations. Fill in safe defaults.
+    """
+    config = getattr(model, "config", None)
+    generation_config = getattr(model, "generation_config", None)
+
+    fallback_bos = 0
+    fallback_eos = 2
+    fallback_pad = 1
+
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        fallback_bos = getattr(text_config, "bos_token_id", fallback_bos)
+        fallback_eos = getattr(text_config, "eos_token_id", fallback_eos)
+        fallback_pad = getattr(text_config, "pad_token_id", fallback_pad)
+
+    fallback_bos = getattr(config, "bos_token_id", fallback_bos)
+    fallback_eos = getattr(config, "eos_token_id", fallback_eos)
+    fallback_pad = getattr(config, "pad_token_id", fallback_pad)
+
+    targets = [obj for obj in (config, text_config, generation_config) if obj is not None]
+    for target in targets:
+        if getattr(target, "forced_bos_token_id", None) is None:
+            setattr(target, "forced_bos_token_id", fallback_bos)
+        if getattr(target, "bos_token_id", None) is None:
+            setattr(target, "bos_token_id", fallback_bos)
+        if getattr(target, "eos_token_id", None) is None:
+            setattr(target, "eos_token_id", fallback_eos)
+        if getattr(target, "pad_token_id", None) is None:
+            setattr(target, "pad_token_id", fallback_pad)
+
+
 def load_gdino_model(config_path=None, checkpoint_path=None, device=None):
     """
     Load GroundingDINO model (singleton — loads once, reuses after).
@@ -179,6 +213,7 @@ def load_florence2_model(model_id=None, device=None):
         trust_remote_code=True,
         torch_dtype=torch_dtype,
     )
+    _ensure_florence2_generation_config(model)
     model = model.to(device)
     model.eval()
 
