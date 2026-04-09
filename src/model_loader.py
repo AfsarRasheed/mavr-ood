@@ -68,6 +68,36 @@ _clip_verifier = None
 _florence2_bundle = None
 
 
+def _ensure_florence2_config_fields(config):
+    """
+    Fill missing Florence-2 config attributes before model construction.
+    """
+    if config is None:
+        return config
+
+    fallback_bos = getattr(config, "bos_token_id", 0)
+    fallback_eos = getattr(config, "eos_token_id", 2)
+    fallback_pad = getattr(config, "pad_token_id", 1)
+
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        fallback_bos = getattr(text_config, "bos_token_id", fallback_bos)
+        fallback_eos = getattr(text_config, "eos_token_id", fallback_eos)
+        fallback_pad = getattr(text_config, "pad_token_id", fallback_pad)
+
+    for target in [obj for obj in (config, text_config) if obj is not None]:
+        if getattr(target, "forced_bos_token_id", None) is None:
+            setattr(target, "forced_bos_token_id", fallback_bos)
+        if getattr(target, "bos_token_id", None) is None:
+            setattr(target, "bos_token_id", fallback_bos)
+        if getattr(target, "eos_token_id", None) is None:
+            setattr(target, "eos_token_id", fallback_eos)
+        if getattr(target, "pad_token_id", None) is None:
+            setattr(target, "pad_token_id", fallback_pad)
+
+    return config
+
+
 def _ensure_florence2_generation_config(model):
     """
     Florence-2 remote code can expect generation/config attributes that may be
@@ -202,14 +232,17 @@ def load_florence2_model(model_id=None, device=None):
     device = device or DEVICE
     model_id = model_id or DEFAULT_FLORENCE2_MODEL_ID
 
-    from transformers import AutoModelForCausalLM, AutoProcessor
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
 
     print(f"[i] Loading Florence-2 ({model_id})...")
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    config = _ensure_florence2_config_fields(config)
 
     torch_dtype = torch.float16 if device == "cuda" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
+        config=config,
         trust_remote_code=True,
         torch_dtype=torch_dtype,
     )
