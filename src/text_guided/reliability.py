@@ -19,6 +19,10 @@ def determine_match_decision(ranked_candidates):
     top_score = float(top["scores"]["final_score"])
     second_score = float(ranked_candidates[1]["scores"]["final_score"]) if len(ranked_candidates) > 1 else 0.0
     margin = top_score - second_score
+    clip_score = float(top["scores"].get("clip_score", 0.0))
+    object_score = float(top["scores"].get("object_score", 0.0))
+    spatial_score = float(top["scores"].get("spatial_score", 0.0))
+    clip_passed = bool(top.get("clip_passed", False))
 
     strongest_violations = len(top.get("match_analysis", {}).get("violated_constraints", []))
     ambiguity_penalty = float(top.get("match_analysis", {}).get("ambiguity_penalty", 0.0))
@@ -31,6 +35,17 @@ def determine_match_decision(ranked_candidates):
     effective_confidence = max(0.0, top_score)
 
     if effective_confidence < 0.35:
+        # Rescue simple cases where the pipeline has one clearly actionable
+        # candidate but the aggregate score remains conservative.
+        if clip_passed and clip_score >= 0.25 and object_score >= 0.40 and (
+            len(ranked_candidates) == 1 or margin >= 0.08 or spatial_score >= 0.55
+        ):
+            return {
+                "state": "closest_match",
+                "confidence": round(max(effective_confidence, clip_score), 4),
+                "selected_indices": [top["index"]],
+                "reason": "A single CLIP-supported candidate was available even though the final trust score stayed conservative.",
+            }
         return {
             "state": "no_reliable_match",
             "confidence": round(effective_confidence, 4),
