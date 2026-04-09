@@ -47,25 +47,30 @@ def reasoning_agent(pipeline_data):
     spatial_term = pipeline_data.get("spatial_term", "none")
     n_selected = pipeline_data.get("n_selected", 0)
 
-    context = f"""A multi-agent vision-language detection pipeline processed a road scene image with the following results:
+    context = f"""A vision-language system analyzed a road scene image to find a specific object. Here is what happened:
 
-Query: "{query}"
-Scene Analysis: {scene_type} scene, {lighting} lighting, {n_objects} objects identified in the scene.
-Attribute Matching: {reasoning}. Ambiguity level: {ambiguity}. Detection prompt refined to: "{rec_prompt}".
-Object Detection: GroundingDINO detected {n_candidates} candidate region(s) matching the prompt.
-Semantic Verification: CLIP verified {n_verified} candidate(s), rejected {n_rejected}. {clip_details}
-Spatial Selection: Spatial filter '{spatial_term}' applied, {n_selected} object(s) selected.
-Segmentation: SAM generated pixel-precise segmentation mask for the selected object."""
+User's query: "{query}"
+Scene: A {scene_type} scene with {lighting} lighting. {n_objects} objects were found in the scene.
+Attribute analysis: {reasoning}. Ambiguity: {ambiguity}. The search was refined to look for: "{rec_prompt}".
+Detection: {n_candidates} candidate object(s) were found matching the description.
+Verification: {n_verified} candidate(s) were confirmed as visually matching, {n_rejected} were rejected because they did not look similar enough. {clip_details}
+Spatial selection: The '{spatial_term}' positioning rule was used, and {n_selected} object(s) were selected as the final result.
+Segmentation: A precise outline mask was generated for the selected object."""
 
     prompt = f"""{context}
 
-Based on the above pipeline results, write a clear reasoning paragraph that explains:
-1. What the system found in the scene
-2. How it identified the target object from the user's query
-3. Why certain candidates were accepted or rejected
-4. How the final object was selected and how confident the decision is
+Write a single, clear reasoning paragraph that a non-technical person can understand. Your paragraph should cover:
+1. Briefly describe the scene (road type, lighting, what objects are present)
+2. Explain how the system understood the user's query and what attributes it looked for
+3. Explain which candidates matched and which didn't in plain language (do NOT mention raw similarity scores like 0.283 — instead say "strong match", "weak match", "high confidence", etc.)
+4. Describe what the final detected object looks like — its type, color, approximate size, position in the scene, and any notable visual characteristics
+5. State how confident the system is in the final result
 
-Write as a single cohesive paragraph. Be specific and reference the actual numbers. Do not use bullet points."""
+IMPORTANT RULES:
+- Do NOT mention model names like GroundingDINO, CLIP, SAM, or LLaVA. Use plain terms like "the object detector", "visual verification", "segmentation".
+- Do NOT include raw numerical scores. Convert them to natural language (e.g., "high confidence", "strong visual match", "moderate certainty").
+- Write in a clear, professional tone as if explaining to someone viewing the result.
+- Write as one cohesive paragraph. Do not use bullet points or numbered lists."""
 
     messages = [
         {"role": "user", "content": prompt}
@@ -90,30 +95,53 @@ Write as a single cohesive paragraph. Be specific and reference the actual numbe
 
 def _fallback_reasoning(data):
     """Rule-based fallback if LLaVA fails."""
+    query = data.get('query', '')
+    scene_type = data.get('scene_type', 'road')
+    lighting = data.get('lighting', 'unknown')
+    n_objects = data.get('n_objects', 0)
+    reasoning = data.get('reasoning', 'target matched')
+    ambiguity = data.get('ambiguity', 'unknown')
+    n_candidates = data.get('n_candidates', 0)
+    n_verified = data.get('n_verified', 0)
+    n_rejected = data.get('n_rejected', 0)
+    spatial = data.get('spatial_term', 'none')
+    n_selected = data.get('n_selected', 0)
+
+    # Confidence in natural language
+    if ambiguity == 'low':
+        confidence = "high confidence"
+    elif ambiguity == 'medium':
+        confidence = "moderate confidence"
+    else:
+        confidence = "some uncertainty"
+
     parts = []
     parts.append(
-        f"The system analyzed a {data.get('scene_type', 'road')} scene "
-        f"with {data.get('lighting', 'unknown')} lighting and identified "
-        f"{data.get('n_objects', 0)} objects."
+        f"The system examined a {scene_type} scene with {lighting} lighting "
+        f"and identified {n_objects} objects in the image."
     )
     parts.append(
-        f"For the query \"{data.get('query', '')}\", the attribute matching agent "
-        f"determined: {data.get('reasoning', 'target matched')} "
-        f"with {data.get('ambiguity', 'unknown')} ambiguity."
+        f"To locate \"{query}\", the system analyzed the key visual attributes "
+        f"and determined: {reasoning}."
     )
-    parts.append(
-        f"GroundingDINO detected {data.get('n_candidates', 0)} candidates, "
-        f"of which {data.get('n_verified', 0)} passed CLIP semantic verification."
-    )
-    if data.get('n_rejected', 0) > 0:
+    if n_candidates > 0:
         parts.append(
-            f"{data.get('n_rejected', 0)} candidate(s) were rejected due to "
-            f"low visual similarity."
+            f"The object detector found {n_candidates} candidate(s) matching "
+            f"the description, and visual verification confirmed {n_verified} "
+            f"as a strong match."
         )
-    spatial = data.get('spatial_term', 'none')
+    if n_rejected > 0:
+        parts.append(
+            f"{n_rejected} candidate(s) were filtered out because they did not "
+            f"visually resemble the target closely enough."
+        )
     if spatial and spatial != 'none':
         parts.append(
-            f"The spatial filter '{spatial}' selected "
-            f"{data.get('n_selected', 0)} object(s) as the final detection."
+            f"Based on the \"{spatial}\" positioning cue from the query, "
+            f"{n_selected} object(s) were selected as the final detection."
         )
+    parts.append(
+        f"The system has {confidence} in this result, and a precise "
+        f"segmentation mask was generated for the detected object."
+    )
     return " ".join(parts)
