@@ -292,73 +292,88 @@ def load_clip_verifier(device=None):
 
 def _patch_florence2_remote_code(model_id):
     """
-    Download and patch Florence-2's remote configuration code on disk.
+    Download and patch Florence-2's remote code on disk before loading.
 
-    The remote ``configuration_florence2.py`` shipped by Microsoft has a bug:
-    ``Florence2LanguageConfig.__init__`` accesses ``self.forced_bos_token_id``
-    before ``super().__init__()`` sets it, causing an ``AttributeError``.
+    Microsoft's remote code has two known compatibility bugs with recent
+    transformers versions:
 
-    This function:
-      1. Triggers a config download (which caches the remote .py files)
-      2. Patches the cached file on disk (``self.X`` → ``getattr(self, 'X', None)``)
-      3. Clears stale module cache so Python reloads the fixed version
+    1. ``configuration_florence2.py``: accesses ``self.forced_bos_token_id``
+       before ``super().__init__()`` sets it → ``AttributeError``
+    2. ``processing_florence2.py``: accesses ``tokenizer.additional_special_tokens``
+       which doesn't exist on newer ``RobertaTokenizer`` → ``AttributeError``
+
+    This function downloads the remote files (triggering cache), patches them
+    on disk, and clears stale module imports.
     """
     import os
-    import glob
 
     from transformers import AutoConfig
 
     # Step 1: Trigger download of remote code files.
-    # This will likely crash due to the bug, but the .py files get cached first.
+    # This will likely crash due to the config bug, but the .py files
+    # get cached on disk regardless.
     try:
         AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-        print("[OK] Florence-2 config loaded without patching (no bug present)")
-        return  # No patch needed
-    except (AttributeError, Exception) as e:
-        if "forced_bos_token_id" not in str(e):
-            # Different error — re-raise
-            raise
-        print(f"[i] Expected Florence-2 config bug detected, patching...")
+    except Exception:
+        pass  # Expected — we just need the files downloaded
 
-    # Step 2: Find the cached configuration_florence2.py file
+    # Step 2: Find and patch all Florence-2 remote code files
     cache_base = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
-    patched = False
+    patched_files = []
+
+    # Patches for configuration_florence2.py
+    config_repairs = {
+        "if self.forced_bos_token_id is None":
+            "if getattr(self, 'forced_bos_token_id', None) is None",
+        "if self.forced_eos_token_id is None":
+            "if getattr(self, 'forced_eos_token_id', None) is None",
+    }
+
+    # Patches for processing_florence2.py
+    processing_repairs = {
+        "tokenizer.additional_special_tokens + ":
+            "getattr(tokenizer, 'additional_special_tokens', []) + ",
+        "tokenizer.additional_special_tokens +\\":
+            "getattr(tokenizer, 'additional_special_tokens', []) +\\",
+    }
+
     for root, dirs, files in os.walk(cache_base):
+        if "florence" not in root.lower():
+            continue
         for fname in files:
-            if fname == "configuration_florence2.py" and "florence" in root.lower():
-                filepath = os.path.join(root, fname)
-                with open(filepath, "r") as fh:
-                    content = fh.read()
+            filepath = os.path.join(root, fname)
+            repairs = {}
+            if fname == "configuration_florence2.py":
+                repairs = config_repairs
+            elif fname == "processing_florence2.py":
+                repairs = processing_repairs
+            else:
+                continue
 
-                # Fix: replace bare self.attr with getattr(self, attr, None)
-                repairs = {
-                    "if self.forced_bos_token_id is None":
-                        "if getattr(self, 'forced_bos_token_id', None) is None",
-                    "if self.forced_eos_token_id is None":
-                        "if getattr(self, 'forced_eos_token_id', None) is None",
-                }
-                changed = False
-                for old, new in repairs.items():
-                    if old in content:
-                        content = content.replace(old, new)
-                        changed = True
+            with open(filepath, "r") as fh:
+                content = fh.read()
 
-                if changed:
-                    with open(filepath, "w") as fh:
-                        fh.write(content)
-                    patched = True
-                    print(f"[OK] Patched: {filepath}")
+            changed = False
+            for old, new in repairs.items():
+                if old in content:
+                    content = content.replace(old, new)
+                    changed = True
 
-    # Step 3: Clear stale modules so Python reloads the patched file
-    stale = [k for k in sys.modules
-             if "florence" in k.lower() and "configuration" in k.lower()]
+            if changed:
+                with open(filepath, "w") as fh:
+                    fh.write(content)
+                patched_files.append(fname)
+                print(f"[OK] Patched: {filepath}")
+
+    # Step 3: Clear stale modules so Python reloads the patched files
+    stale = [k for k in sys.modules if "florence" in k.lower()]
     for k in stale:
         del sys.modules[k]
 
-    if patched:
-        print("[OK] Florence-2 remote code patched successfully")
+    if patched_files:
+        print(f"[OK] Florence-2 remote code patched: {', '.join(patched_files)}")
     else:
-        print("[WARN] Could not find Florence-2 config file to patch")
+        print("[i] Florence-2 remote code — no patches needed")
 
 
 def load_florence2_model(model_id=None, device=None):
