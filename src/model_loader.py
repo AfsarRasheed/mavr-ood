@@ -111,30 +111,15 @@ def _ensure_florence2_config_fields(config):
 
 def _load_florence2_config_with_defaults(model_id):
     """
-    Load Florence-2 config JSON first, inject missing fields into the nested
-    text config payload, then build the HF config object from that patched
-    dictionary.
+    Load Florence-2 config with trust_remote_code and ensure all required
+    token ID fields are present.
+
+    This runs AFTER _patch_florence2_remote_code has fixed the config file
+    on disk, so AutoConfig.from_pretrained will succeed.
     """
-    from huggingface_hub import hf_hub_download
     from transformers import AutoConfig
 
-    config_path = hf_hub_download(repo_id=model_id, filename="config.json")
-    with open(config_path, "r", encoding="utf-8") as handle:
-        config_dict = json.load(handle)
-
-    text_config = dict(config_dict.get("text_config") or {})
-    text_config.setdefault("bos_token_id", config_dict.get("bos_token_id", 0))
-    text_config.setdefault("eos_token_id", config_dict.get("eos_token_id", 2))
-    text_config.setdefault("pad_token_id", config_dict.get("pad_token_id", 1))
-    text_config.setdefault("forced_bos_token_id", text_config.get("bos_token_id", 0))
-    config_dict["text_config"] = text_config
-    config_dict.setdefault("bos_token_id", text_config["bos_token_id"])
-    config_dict.setdefault("eos_token_id", text_config["eos_token_id"])
-    config_dict.setdefault("pad_token_id", text_config["pad_token_id"])
-    config_dict.setdefault("forced_bos_token_id", text_config["forced_bos_token_id"])
-
-    model_type = config_dict.pop("model_type", "florence2")
-    config = AutoConfig.for_model(model_type, **config_dict)
+    config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
     return _ensure_florence2_config_fields(config)
 
 
