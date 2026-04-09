@@ -413,12 +413,15 @@ def load_florence2_model(model_id=None, device=None):
         config = _load_florence2_config_with_defaults(model_id)
 
         # Step 4: Load model with patched config
+        # attn_implementation="eager" bypasses SDPA check — Florence-2's remote
+        # code doesn't define _supports_sdpa which newer transformers expects.
         torch_dtype = torch.float16 if device == "cuda" else torch.float32
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             config=config,
             trust_remote_code=True,
             torch_dtype=torch_dtype,
+            attn_implementation="eager",
         )
         _ensure_florence2_generation_config(model)
         processor = _ensure_florence2_tokenizer_padding(processor, model=model)
