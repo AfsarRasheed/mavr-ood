@@ -307,15 +307,21 @@ def _patch_florence2_remote_code(model_id):
     """
     import os
 
-    from transformers import AutoConfig
+    from transformers import AutoConfig, AutoProcessor
 
-    # Step 1: Trigger download of remote code files.
-    # This will likely crash due to the config bug, but the .py files
-    # get cached on disk regardless.
+    # Step 1: Trigger download of ALL remote code files.
+    # AutoConfig only downloads configuration_florence2.py, while
+    # AutoProcessor also downloads processing_florence2.py.
+    # Both calls will likely crash due to bugs, but that's OK —
+    # we just need the .py files cached on disk.
     try:
         AutoConfig.from_pretrained(model_id, trust_remote_code=True)
     except Exception:
-        pass  # Expected — we just need the files downloaded
+        pass
+    try:
+        AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    except Exception:
+        pass
 
     # Step 2: Find and patch all Florence-2 remote code files
     cache_base = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
