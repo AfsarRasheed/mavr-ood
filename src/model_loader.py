@@ -142,6 +142,36 @@ def _ensure_florence2_generation_config(model):
             setattr(target, "pad_token_id", fallback_pad)
 
 
+def _ensure_florence2_tokenizer_padding(processor, model=None):
+    """
+    Ensure Florence-2 has a usable pad token for processor tokenization and generation.
+    """
+    tokenizer = getattr(processor, "tokenizer", None)
+    if tokenizer is None:
+        return processor
+
+    if getattr(tokenizer, "pad_token", None) is None:
+        if getattr(tokenizer, "eos_token", None) is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        else:
+            tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+            if model is not None:
+                model.resize_token_embeddings(len(tokenizer))
+
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        eos_token_id = getattr(tokenizer, "eos_token_id", None)
+        if eos_token_id is not None:
+            tokenizer.pad_token_id = eos_token_id
+            pad_token_id = eos_token_id
+
+    for target in (getattr(model, "config", None), getattr(model, "generation_config", None)):
+        if target is not None and getattr(target, "pad_token_id", None) is None and pad_token_id is not None:
+            setattr(target, "pad_token_id", pad_token_id)
+
+    return processor
+
+
 def load_gdino_model(config_path=None, checkpoint_path=None, device=None):
     """
     Load GroundingDINO model (singleton — loads once, reuses after).
@@ -258,6 +288,7 @@ def load_florence2_model(model_id=None, device=None):
             torch_dtype=torch_dtype,
         )
         _ensure_florence2_generation_config(model)
+        processor = _ensure_florence2_tokenizer_padding(processor, model=model)
         model = model.to(device)
         model.eval()
     except Exception:

@@ -95,6 +95,7 @@ def run_florence2_grounding(
         max_new_tokens=max_new_tokens,
         num_beams=3,
         do_sample=False,
+        pad_token_id=getattr(getattr(florence_processor, "tokenizer", None), "pad_token_id", None),
     )
     generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
 
