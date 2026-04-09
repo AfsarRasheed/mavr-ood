@@ -15,6 +15,7 @@ Usage:
 
 import os
 import sys
+import traceback
 import torch
 
 # ============================================================
@@ -81,6 +82,15 @@ def _ensure_florence2_config_fields(config):
 
     text_config = getattr(config, "text_config", None)
     if text_config is not None:
+        text_config_cls = type(text_config)
+        if not hasattr(text_config_cls, "forced_bos_token_id"):
+            setattr(text_config_cls, "forced_bos_token_id", fallback_bos)
+        if not hasattr(text_config_cls, "bos_token_id"):
+            setattr(text_config_cls, "bos_token_id", fallback_bos)
+        if not hasattr(text_config_cls, "eos_token_id"):
+            setattr(text_config_cls, "eos_token_id", fallback_eos)
+        if not hasattr(text_config_cls, "pad_token_id"):
+            setattr(text_config_cls, "pad_token_id", fallback_pad)
         fallback_bos = getattr(text_config, "bos_token_id", fallback_bos)
         fallback_eos = getattr(text_config, "eos_token_id", fallback_eos)
         fallback_pad = getattr(text_config, "pad_token_id", fallback_pad)
@@ -234,21 +244,26 @@ def load_florence2_model(model_id=None, device=None):
 
     from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
 
-    print(f"[i] Loading Florence-2 ({model_id})...")
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-    config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-    config = _ensure_florence2_config_fields(config)
+    try:
+        print(f"[i] Loading Florence-2 ({model_id})...")
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        config = _ensure_florence2_config_fields(config)
 
-    torch_dtype = torch.float16 if device == "cuda" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        config=config,
-        trust_remote_code=True,
-        torch_dtype=torch_dtype,
-    )
-    _ensure_florence2_generation_config(model)
-    model = model.to(device)
-    model.eval()
+        torch_dtype = torch.float16 if device == "cuda" else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            config=config,
+            trust_remote_code=True,
+            torch_dtype=torch_dtype,
+        )
+        _ensure_florence2_generation_config(model)
+        model = model.to(device)
+        model.eval()
+    except Exception:
+        print("[ERR] Florence-2 load traceback:")
+        traceback.print_exc()
+        raise
 
     _florence2_bundle = {
         "model_id": model_id,

@@ -9,6 +9,7 @@ import gc
 import io
 import time
 import json
+import traceback
 import base64
 import tempfile
 import numpy as np
@@ -93,6 +94,7 @@ def load_all_models():
         models['florence2'] = load_florence2_model()
     except Exception as e:
         models['florence2'] = None
+        traceback.print_exc()
         print(f"[WARN] Florence-2 not available at startup: {e}")
     print("[OK] All detection models loaded")
 
