@@ -162,11 +162,9 @@ async def detect(
             image_np=img_np,
             user_prompt=query,
             image_path=tmp_path,
-            gdino_model=models['gdino'],
             sam_predictor=models['sam'],
             clip_verifier=models['clip'],
             florence2_backend=models.get('florence2'),
-            box_threshold=0.35,
             clip_threshold=0.25,
         )
         elapsed = round(time.time() - t0, 1)

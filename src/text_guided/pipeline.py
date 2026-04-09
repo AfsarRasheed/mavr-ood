@@ -1,6 +1,14 @@
 """
 Text-Guided Detection Pipeline (Main Orchestrator)
-Runs all 7 steps: Scene Agent → Attribute Agent → GroundingDINO → CLIP → Spatial → SAM → Reasoning
+Runs all 7 steps: Scene Agent → Attribute Agent → Florence-2 → CLIP → Spatial → SAM → Reasoning
+
+This branch uses Florence-2 as the sole grounding backend for text-guided
+detection. Florence-2 replaces GroundingDINO because it understands richer,
+more natural prompts (conditions, multi-attribute descriptions) without
+requiring aggressive prompt simplification.
+
+The OOD pipeline continues to use GroundingDINO separately — this module
+does not affect OOD behavior.
 """
 
 import gc
@@ -20,7 +28,7 @@ from src.text_guided.candidate_reasoner import summarize_candidate_match
 from src.text_guided.semantic_controller import build_semantic_plan
 from src.text_guided.candidate_judge import judge_candidate_against_plan
 from src.text_guided.reliability import determine_match_decision
-from src.text_guided.florence2_backend import run_florence2_grounding
+from src.text_guided.florence2_backend import run_florence2_grounding, run_florence2_anchor_grounding
 from src.agents.vlm_backend import run_vlm
 
 
@@ -425,21 +433,30 @@ Return ONLY valid JSON:
 
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
-                              gdino_model, sam_predictor, clip_verifier,
-                              florence2_backend=None, text_guided_backend=None,
-                              box_threshold=0.35, clip_threshold=0.25,
+                              sam_predictor, clip_verifier,
+                              florence2_backend=None,
+                              clip_threshold=0.25,
                               precomputed_scene=None, precomputed_attr=None):
     """
-    Run the complete text-guided detection pipeline.
+    Run the complete Florence-2 text-guided detection pipeline.
+
+    Pipeline steps:
+      1. Scene Understanding Agent (LLaVA)
+      2. Attribute Matching Agent (LLaVA)
+      2.5. Query Parsing + Semantic Plan
+      3. Florence-2 Candidate Grounding
+      4. CLIP Semantic Verification
+      5. Candidate Ranking + Reliability Decision
+      6. SAM Segmentation
+      7. Reasoning Agent (LLaVA)
 
     Args:
         image_np: numpy RGB image (H, W, 3)
         user_prompt: user's text query e.g. "the grey car on the left"
         image_path: path to image file (for LLaVA scene analysis)
-        gdino_model: retained for backward compatibility; unused in Florence-only text-guided mode
         sam_predictor: loaded SAM predictor
         clip_verifier: loaded CLIP verifier
-        box_threshold: retained for backward compatibility; unused in Florence-only text-guided mode
+        florence2_backend: dict with 'model', 'processor', 'device' for Florence-2
         clip_threshold: CLIP similarity threshold
         precomputed_scene: pre-computed scene result (skip LLaVA call 1)
         precomputed_attr: pre-computed attribute result (skip LLaVA call 2)
@@ -533,13 +550,14 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     grounding_backend = "florence2"
     if florence2_backend is None:
         raise RuntimeError(
-            "This Florence branch requires Florence-2 for text-guided detection, but the Florence-2 model is not loaded."
+            "Florence-2 is required for text-guided detection in this branch, "
+            "but the Florence-2 model is not loaded. Check model loading in web_app.py."
         )
 
-    # ---- Step 3: Candidate Detection / Grounding ----
-    print(f"[i] Running {grounding_backend} grounding with prompt: '{parsed['object_prompt']}'")
-
     image_pil = PILImage.fromarray(image_np)
+
+    # ---- Step 3: Candidate Detection / Grounding ----
+    print(f"[i] Running Florence-2 grounding with prompt: '{parsed['object_prompt']}'")
 
     candidate_output = _run_text_guided_candidate_proposal(
         florence2_backend=florence2_backend,
@@ -552,43 +570,44 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     all_labels = candidate_output["labels"]
     all_det_scores = candidate_output["scores"]
 
-    print(f"[OK] {grounding_backend} found {len(boxes_filt)} candidates")
+    print(f"[OK] Florence-2 found {len(boxes_filt)} candidates")
 
-    # ---- Retry logic if 0 candidates found ----
-    if False and grounding_backend == "gdino" and len(boxes_filt) == 0:
-        # Retry 1: lower threshold
-        retry_threshold = 0.20
-        print(f"[WARN] 0 candidates — retrying with lower threshold ({retry_threshold})...")
-        candidate_output = _run_gdino_candidate_proposal(
-            gdino_model=gdino_model,
-            image_tensor_dev=image_tensor_dev,
-            prompt=parsed["object_prompt"],
-            image_size=(H, W),
-            box_threshold=retry_threshold,
-        )
-        boxes_filt = candidate_output["boxes_cxcywh"]
-        all_boxes_xyxy = candidate_output["boxes_xyxy"]
-        all_labels = candidate_output["labels"]
-        all_det_scores = candidate_output["scores"]
-        print(f"[i] Retry 1: {len(boxes_filt)} candidates at threshold {retry_threshold}")
-
-    if False and grounding_backend == "gdino" and len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
-        # Retry 2: use raw user prompt
+    # ---- Florence-2 retry logic if 0 candidates found ----
+    if len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
+        # Retry with raw user prompt — Florence-2 may understand the natural
+        # phrasing better than the parsed/simplified prompt.
         raw_prompt = user_prompt.lower().strip()
-        raw_caption = raw_prompt
-        print(f"[WARN] Still 0 — retrying with raw prompt: '{raw_caption}'")
-        candidate_output = _run_gdino_candidate_proposal(
-            gdino_model=gdino_model,
-            image_tensor_dev=image_tensor_dev,
-            prompt=raw_prompt,
+        print(f"[WARN] 0 candidates — retrying Florence-2 with raw prompt: '{raw_prompt}'")
+        parsed_retry = dict(parsed, object_prompt=raw_prompt)
+        candidate_output = _run_text_guided_candidate_proposal(
+            florence2_backend=florence2_backend,
+            image_pil=image_pil,
+            parsed=parsed_retry,
             image_size=(H, W),
-            box_threshold=0.20,
         )
         boxes_filt = candidate_output["boxes_cxcywh"]
         all_boxes_xyxy = candidate_output["boxes_xyxy"]
         all_labels = candidate_output["labels"]
         all_det_scores = candidate_output["scores"]
-        print(f"[i] Retry 2: {len(boxes_filt)} candidates with raw prompt")
+        print(f"[i] Retry: Florence-2 found {len(boxes_filt)} candidates with raw prompt")
+
+    if len(boxes_filt) == 0:
+        # Final retry with just the target object name
+        target_obj = parsed.get('target_object', '').strip()
+        if target_obj and target_obj != parsed['object_prompt'].strip():
+            print(f"[WARN] Still 0 — retrying Florence-2 with target object only: '{target_obj}'")
+            parsed_retry = dict(parsed, object_prompt=target_obj)
+            candidate_output = _run_text_guided_candidate_proposal(
+                florence2_backend=florence2_backend,
+                image_pil=image_pil,
+                parsed=parsed_retry,
+                image_size=(H, W),
+            )
+            boxes_filt = candidate_output["boxes_cxcywh"]
+            all_boxes_xyxy = candidate_output["boxes_xyxy"]
+            all_labels = candidate_output["labels"]
+            all_det_scores = candidate_output["scores"]
+            print(f"[i] Retry 2: Florence-2 found {len(boxes_filt)} candidates with '{target_obj}'")
 
 
     # ---- Step 4/5: CLIP + Full-Query Candidate Ranking ----
@@ -599,15 +618,43 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     anchor_boxes = None
     anchor_info = None
 
-    # Detect anchor (reference) object if relational query
+    # Detect anchor (reference) object using Florence-2 for relational queries
     if parsed.get('anchor') and parsed.get('spatial') in ('next_to', 'behind', 'in_front', 'above', 'below', 'between'):
-        print("[i] Florence-only text-guided mode is active; legacy GDINO anchor detection is disabled.")
+        anchor_name = parsed['anchor']
+        print(f"[i] Grounding anchor object '{anchor_name}' with Florence-2...")
+        anchor_result = run_florence2_anchor_grounding(
+            florence_model=florence2_backend["model"],
+            florence_processor=florence2_backend["processor"],
+            image_pil=image_pil,
+            anchor_name=anchor_name,
+            device=florence2_backend["device"],
+            image_size=(H, W),
+        )
+        if anchor_result is not None:
+            anchor_boxes = anchor_result["boxes_xyxy"]
+            anchor_info = {"confidence": anchor_result["confidence"], "label": anchor_result["label"]}
+        else:
+            print(f"[WARN] Anchor '{anchor_name}' not found — spatial scoring will be weaker")
 
     # Detect second anchor for "between" queries
     anchor2_boxes = None
     anchor2_info = None
     if parsed.get('anchor2') and parsed.get('spatial') == 'between':
-        print("[i] Florence-only text-guided mode is active; second-anchor GDINO detection is disabled.")
+        anchor2_name = parsed['anchor2']
+        print(f"[i] Grounding second anchor '{anchor2_name}' with Florence-2...")
+        anchor2_result = run_florence2_anchor_grounding(
+            florence_model=florence2_backend["model"],
+            florence_processor=florence2_backend["processor"],
+            image_pil=image_pil,
+            anchor_name=anchor2_name,
+            device=florence2_backend["device"],
+            image_size=(H, W),
+        )
+        if anchor2_result is not None:
+            anchor2_boxes = anchor2_result["boxes_xyxy"]
+            anchor2_info = {"confidence": anchor2_result["confidence"], "label": anchor2_result["label"]}
+        else:
+            print(f"[WARN] Second anchor '{anchor2_name}' not found — 'between' scoring will be weaker")
 
     if len(boxes_filt) > 0 and clip_verifier is not None:
         print(f"[i] Running CLIP verification + natural-language candidate scoring (threshold={clip_threshold})...")

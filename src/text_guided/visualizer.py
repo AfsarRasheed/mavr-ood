@@ -37,7 +37,7 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
                                   all_boxes_xyxy, all_labels, all_scores,
                                   clip_mask, clip_scores,
                                   selected_idx, final_masks,
-                                  grounding_backend="gdino"):
+                                  grounding_backend="florence2"):
     """
     Generate visualization images for each pipeline step.
 

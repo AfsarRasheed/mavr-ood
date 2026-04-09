@@ -1,14 +1,20 @@
 """
 Florence-2 text-guided grounding backend.
 
+Provides phrase-grounding via Florence-2's <CAPTION_TO_PHRASE_GROUNDING> task.
 This module is intentionally isolated so the rest of the text-guided pipeline
 can keep using the same CLIP / semantic judging / reliability / SAM flow.
+
+Florence-2 replaces GroundingDINO for the text-guided pipeline because it
+understands richer, more natural prompts (conditions, multi-attribute
+descriptions) without needing aggressive prompt simplification.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+import torch
 from PIL import Image
 
 from src.text_guided.candidate_adapter import normalize_candidate_output
@@ -120,3 +126,60 @@ def run_florence2_grounding(
             "processed": processed,
         },
     )
+
+
+def run_florence2_anchor_grounding(
+    *,
+    florence_model,
+    florence_processor,
+    image_pil: Image.Image,
+    anchor_name: str,
+    device: str,
+    image_size: tuple[int, int],
+) -> dict | None:
+    """
+    Use Florence-2 to ground a reference/anchor object for relational queries.
+
+    For example, when the user says "the car next to the truck", this function
+    grounds "truck" to get anchor boxes that the spatial scoring can use.
+
+    Returns:
+        dict with keys 'boxes_xyxy' (tensor), 'confidence' (float), 'label' (str)
+        or None if no anchor was found.
+    """
+    result = run_florence2_grounding(
+        florence_model=florence_model,
+        florence_processor=florence_processor,
+        image_pil=image_pil,
+        prompt=anchor_name,
+        device=device,
+        image_size=image_size,
+    )
+
+    boxes_xyxy = result.get("boxes_xyxy")
+    scores = result.get("scores", [])
+    labels = result.get("labels", [])
+
+    if boxes_xyxy is None or len(boxes_xyxy) == 0:
+        print(f"[WARN] Florence-2 could not ground anchor '{anchor_name}'")
+        return None
+
+    # Pick the highest-confidence detection as the anchor
+    if scores:
+        best_idx = int(torch.tensor(scores).argmax())
+    else:
+        best_idx = 0
+
+    confidence = float(scores[best_idx]) if scores else 0.5
+    # Florence-2 phrase grounding doesn't always return meaningful scores,
+    # so we give a baseline confidence when the model found something.
+    if confidence <= 0.0:
+        confidence = 0.6
+
+    print(f"[OK] Florence-2 grounded anchor '{anchor_name}' with confidence {confidence:.3f}")
+
+    return {
+        "boxes_xyxy": boxes_xyxy[best_idx:best_idx + 1],
+        "confidence": confidence,
+        "label": labels[best_idx] if labels else anchor_name,
+    }

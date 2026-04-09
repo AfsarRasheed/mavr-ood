@@ -272,13 +272,13 @@ def parse_query(user_prompt):
     colors = _extract_terms(object_desc, COLOR_TERMS)
     conditions = _extract_terms(object_desc, CONDITION_TERMS)
 
-    gdino_prompt = object_desc.strip()
-    if not gdino_prompt:
-        gdino_prompt = user_prompt.strip()
+    detection_prompt = object_desc.strip()
+    if not detection_prompt:
+        detection_prompt = user_prompt.strip()
 
     result = _build_query_result(
         user_prompt=user_prompt,
-        detection_prompt=gdino_prompt,
+        detection_prompt=detection_prompt,
         target_object=_guess_target_object(object_desc),
         color=colors[0] if colors else None,
         conditions=conditions,
@@ -290,7 +290,7 @@ def parse_query(user_prompt):
 
     anchor_info = f", anchor='{anchor}'" if anchor else ""
     print(
-        f"[i] Query parsed: object='{gdino_prompt}', target='{result.get('target_object')}', "
+        f"[i] Query parsed: object='{detection_prompt}', target='{result.get('target_object')}', "
         f"attribute={result.get('attribute')}, spatial={spatial}{anchor_info}, "
         f"priorities={result.get('priority_order')}"
     )
