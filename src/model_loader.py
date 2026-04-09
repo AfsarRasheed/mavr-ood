@@ -290,60 +290,75 @@ def load_clip_verifier(device=None):
     return _clip_verifier
 
 
-def _patch_florence2_config_classes(model_id):
+def _patch_florence2_remote_code(model_id):
     """
-    Monkey-patch Florence-2's remote config classes to add class-level default
-    attributes that their __init__ methods expect to read before
-    super().__init__() sets them.
+    Download and patch Florence-2's remote configuration code on disk.
 
-    This fixes:
-        AttributeError: 'Florence2LanguageConfig' object has no attribute 'forced_bos_token_id'
+    The remote ``configuration_florence2.py`` shipped by Microsoft has a bug:
+    ``Florence2LanguageConfig.__init__`` accesses ``self.forced_bos_token_id``
+    before ``super().__init__()`` sets it, causing an ``AttributeError``.
 
-    The fix works by finding the cached remote module and adding defaults to
-    the class itself, so instance attribute lookups fall through to the class
-    default instead of raising AttributeError.
+    This function:
+      1. Triggers a config download (which caches the remote .py files)
+      2. Patches the cached file on disk (``self.X`` → ``getattr(self, 'X', None)``)
+      3. Clears stale module cache so Python reloads the fixed version
     """
-    import importlib
+    import os
+    import glob
 
-    # The remote code module path follows HuggingFace's naming convention
-    module_candidates = []
-    safe_id = model_id.replace("/", "_hyphen_").replace("-", "_hyphen_")
-    # Try to find the cached module in sys.modules
-    for mod_name, mod in list(sys.modules.items()):
-        if "florence" in mod_name.lower() and "configuration" in mod_name.lower():
-            module_candidates.append(mod)
+    from transformers import AutoConfig
 
-    # Also try direct import from transformers_modules cache
-    if not module_candidates:
-        try:
-            from transformers.dynamic_module_utils import get_cached_module_file
-        except ImportError:
-            pass
+    # Step 1: Trigger download of remote code files.
+    # This will likely crash due to the bug, but the .py files get cached first.
+    try:
+        AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+        print("[OK] Florence-2 config loaded without patching (no bug present)")
+        return  # No patch needed
+    except (AttributeError, Exception) as e:
+        if "forced_bos_token_id" not in str(e):
+            # Different error — re-raise
+            raise
+        print(f"[i] Expected Florence-2 config bug detected, patching...")
 
-    defaults = {
-        "forced_bos_token_id": 0,
-        "bos_token_id": 0,
-        "eos_token_id": 2,
-        "pad_token_id": 1,
-        "forced_eos_token_id": 2,
-    }
-
+    # Step 2: Find the cached configuration_florence2.py file
+    cache_base = os.path.expanduser("~/.cache/huggingface/modules/transformers_modules")
     patched = False
-    for mod in module_candidates:
-        for cls_name in ("Florence2LanguageConfig", "Florence2Config"):
-            cls = getattr(mod, cls_name, None)
-            if cls is not None:
-                for attr, default_val in defaults.items():
-                    if not hasattr(cls, attr):
-                        setattr(cls, attr, default_val)
-                patched = True
+    for root, dirs, files in os.walk(cache_base):
+        for fname in files:
+            if fname == "configuration_florence2.py" and "florence" in root.lower():
+                filepath = os.path.join(root, fname)
+                with open(filepath, "r") as fh:
+                    content = fh.read()
+
+                # Fix: replace bare self.attr with getattr(self, attr, None)
+                repairs = {
+                    "if self.forced_bos_token_id is None":
+                        "if getattr(self, 'forced_bos_token_id', None) is None",
+                    "if self.forced_eos_token_id is None":
+                        "if getattr(self, 'forced_eos_token_id', None) is None",
+                }
+                changed = False
+                for old, new in repairs.items():
+                    if old in content:
+                        content = content.replace(old, new)
+                        changed = True
+
+                if changed:
+                    with open(filepath, "w") as fh:
+                        fh.write(content)
+                    patched = True
+                    print(f"[OK] Patched: {filepath}")
+
+    # Step 3: Clear stale modules so Python reloads the patched file
+    stale = [k for k in sys.modules
+             if "florence" in k.lower() and "configuration" in k.lower()]
+    for k in stale:
+        del sys.modules[k]
 
     if patched:
-        print("[OK] Florence-2 config classes patched with default token IDs")
+        print("[OK] Florence-2 remote code patched successfully")
     else:
-        # If we couldn't find the cached classes yet, patch via a broader
-        # approach: scan all loaded modules for the config class.
-        print("[i] Florence-2 config classes not found in cache yet, will patch via config defaults")
+        print("[WARN] Could not find Florence-2 config file to patch")
 
 
 def load_florence2_model(model_id=None, device=None):
@@ -361,25 +376,21 @@ def load_florence2_model(model_id=None, device=None):
     device = device or DEVICE
     model_id = model_id or DEFAULT_FLORENCE2_MODEL_ID
 
-    from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig
+    from transformers import AutoModelForCausalLM, AutoProcessor
 
     try:
         print(f"[i] Loading Florence-2 ({model_id})...")
 
-        # Step 1: Load processor first (this also downloads/caches remote code)
-        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        # Step 1: Download remote code and patch the config bug on disk
+        _patch_florence2_remote_code(model_id)
 
-        # Step 2: Monkey-patch Florence-2's remote config classes BEFORE model
-        # construction. The remote Florence2LanguageConfig.__init__ accesses
-        # self.forced_bos_token_id before super().__init__() sets it from
-        # kwargs, causing AttributeError. Adding class-level defaults prevents
-        # this crash.
-        _patch_florence2_config_classes(model_id)
+        # Step 2: Load processor (now uses the patched config code)
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
         # Step 3: Build config with injected defaults
         config = _load_florence2_config_with_defaults(model_id)
 
-        # Step 4: Load model with pre-patched config
+        # Step 4: Load model with patched config
         torch_dtype = torch.float16 if device == "cuda" else torch.float32
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
