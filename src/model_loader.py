@@ -133,7 +133,8 @@ def _load_florence2_config_with_defaults(model_id):
     config_dict.setdefault("pad_token_id", text_config["pad_token_id"])
     config_dict.setdefault("forced_bos_token_id", text_config["forced_bos_token_id"])
 
-    config = AutoConfig.for_model(config_dict.get("model_type", "florence2"), **config_dict)
+    model_type = config_dict.pop("model_type", "florence2")
+    config = AutoConfig.for_model(model_type, **config_dict)
     return _ensure_florence2_config_fields(config)
 
 
