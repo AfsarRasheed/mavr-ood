@@ -22,7 +22,8 @@ def reasoning_agent(pipeline_data):
             - reasoning: from attribute agent
             - ambiguity: from attribute agent
             - recommended_prompt: detection prompt used
-            - n_candidates: from GroundingDINO
+            - grounding_backend: active grounding backend
+            - n_candidates: from grounding backend
             - n_verified: after CLIP
             - n_rejected: CLIP rejections
             - clip_details: per-candidate CLIP scores
@@ -40,6 +41,7 @@ def reasoning_agent(pipeline_data):
     reasoning = pipeline_data.get("reasoning", "")
     ambiguity = pipeline_data.get("ambiguity", "unknown")
     rec_prompt = pipeline_data.get("recommended_prompt", query)
+    grounding_backend = pipeline_data.get("grounding_backend", "grounding backend")
     n_candidates = pipeline_data.get("n_candidates", 0)
     n_verified = pipeline_data.get("n_verified", 0)
     n_rejected = pipeline_data.get("n_rejected", 0)
@@ -60,7 +62,7 @@ def reasoning_agent(pipeline_data):
 Query: "{query}"
 Scene Analysis: {scene_type} scene, {lighting} lighting, {n_objects} objects identified in the scene.
 Attribute Matching: {reasoning}. Ambiguity level: {ambiguity}. Detection prompt refined to: "{rec_prompt}".
-Object Detection: GroundingDINO detected {n_candidates} candidate region(s) matching the prompt.
+Object Detection: {grounding_backend} detected {n_candidates} candidate region(s) matching the prompt.
 Semantic Verification: CLIP verified {n_verified} candidate(s), rejected {n_rejected}. {clip_details}
 Constraint Priority: {priority_order}
 Semantic Query Type: {semantic_query_type}
@@ -117,7 +119,7 @@ def _fallback_reasoning(data):
         f"with {data.get('ambiguity', 'unknown')} ambiguity."
     )
     parts.append(
-        f"GroundingDINO detected {data.get('n_candidates', 0)} candidates, "
+        f"{data.get('grounding_backend', 'The grounding backend')} detected {data.get('n_candidates', 0)} candidates, "
         f"of which {data.get('n_verified', 0)} passed CLIP semantic verification."
     )
     if data.get('n_rejected', 0) > 0:

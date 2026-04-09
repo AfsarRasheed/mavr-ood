@@ -75,14 +75,25 @@ models = {}
 
 
 def load_all_models():
-    """Load detection models (not LLaVA — it loads on demand)."""
-    from src.model_loader import load_gdino_model, load_sam_predictor, load_clip_verifier
+    """Load detection models (not LLaVA - it loads on demand)."""
+    from src.model_loader import (
+        load_gdino_model,
+        load_sam_predictor,
+        load_clip_verifier,
+        load_florence2_model,
+    )
     print("[i] Loading GroundingDINO...")
     models['gdino'] = load_gdino_model()
     print("[i] Loading SAM...")
     models['sam'] = load_sam_predictor()
     print("[i] Loading CLIP verifier...")
     models['clip'] = load_clip_verifier()
+    try:
+        print("[i] Loading Florence-2 for text-guided grounding...")
+        models['florence2'] = load_florence2_model()
+    except Exception as e:
+        models['florence2'] = None
+        print(f"[WARN] Florence-2 not available at startup: {e}")
     print("[OK] All detection models loaded")
 
 
@@ -152,6 +163,7 @@ async def detect(
             gdino_model=models['gdino'],
             sam_predictor=models['sam'],
             clip_verifier=models['clip'],
+            florence2_backend=models.get('florence2'),
             box_threshold=0.35,
             clip_threshold=0.25,
         )
@@ -197,6 +209,7 @@ async def detect(
                 "priority_order": parsed.get('priority_order', []),
                 "match_type": parsed.get('match_type'),
                 "semantic_plan": results.get('semantic_plan', {}),
+                "grounding_backend": results.get('grounding_backend', 'gdino'),
             },
             "step_images": step_images_b64,
             "final_overlay": final_overlay,
@@ -207,6 +220,7 @@ async def detect(
             "match_state": results.get('match_state', 'unknown'),
             "match_confidence": results.get('match_confidence', 0.0),
             "match_reason": results.get('match_reason', ''),
+            "grounding_backend": results.get('grounding_backend', 'gdino'),
             "candidate_rankings": results.get('candidate_rankings', []),
             "reasoning": results.get('reasoning', 'No reasoning available.'),
             "summary": results.get('summary', ''),

@@ -320,7 +320,7 @@ function formatGalleryStepName(key) {
     const labels = {
         step1_scene: 'Step 1: Scene Understanding (LLaVA)',
         step2_query: 'Step 2: Attribute Matching (LLaVA)',
-        step3_candidates: 'Step 3: Candidates (GroundingDINO)',
+        step3_candidates: 'Step 3: Candidate Grounding',
         step4_clip: 'Step 4: CLIP Verification',
         step5_spatial: 'Step 5: Spatial Selection',
         step6_final: 'Step 6: Final Segmentation (SAM)',
@@ -337,6 +337,7 @@ function renderGroundingDecision(data) {
         renderLine('Result State', formatResultState(data.match_state)),
         renderLine('Confidence', formatConfidence(data.match_confidence)),
         renderLine('Reason', escapeHtml(data.match_reason || '')),
+        renderLine('Grounding Backend', escapeHtml(data.grounding_backend || parsed.grounding_backend || 'gdino')),
         renderLine('Target Object', escapeHtml(parsed.target_object || parsed.object_prompt || '')),
         renderLine('Detector Prompt', escapeHtml(parsed.object_prompt || '')),
         renderLine('Spatial Constraint', escapeHtml(parsed.spatial || 'none')),

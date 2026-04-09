@@ -5,7 +5,12 @@ Both app.py (Gradio) and text_guided_detector.py import from here.
 No Gradio dependency.
 
 Usage:
-    from src.model_loader import load_gdino_model, load_sam_predictor, load_clip_verifier
+    from src.model_loader import (
+        load_gdino_model,
+        load_sam_predictor,
+        load_clip_verifier,
+        load_florence2_model,
+    )
 """
 
 import os
@@ -50,6 +55,7 @@ if _sam_path not in sys.path:
 DEFAULT_GDINO_CONFIG = os.path.join(_project_root, "GroundingDINO", "groundingdino", "config", "GroundingDINO_SwinT_OGC.py")
 DEFAULT_GDINO_CKPT = os.path.join(_project_root, "weights", "groundingdino_swint_ogc.pth")
 DEFAULT_SAM_CKPT = os.path.join(_project_root, "weights", "sam_vit_h_4b8939.pth")
+DEFAULT_FLORENCE2_MODEL_ID = os.getenv("FLORENCE2_MODEL_ID", "microsoft/Florence-2-large")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -59,6 +65,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 _gdino_model = None
 _sam_predictor = None
 _clip_verifier = None
+_florence2_bundle = None
 
 
 def load_gdino_model(config_path=None, checkpoint_path=None, device=None):
@@ -148,6 +155,41 @@ def load_clip_verifier(device=None):
     _clip_verifier = CLIPVerifier(device=device)
     print("[OK] CLIP loaded")
     return _clip_verifier
+
+
+def load_florence2_model(model_id=None, device=None):
+    """
+    Load Florence-2 model + processor as a singleton bundle.
+    """
+    global _florence2_bundle
+    if _florence2_bundle is not None:
+        return _florence2_bundle
+
+    device = device or DEVICE
+    model_id = model_id or DEFAULT_FLORENCE2_MODEL_ID
+
+    from transformers import AutoModelForCausalLM, AutoProcessor
+
+    print(f"[i] Loading Florence-2 ({model_id})...")
+    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+    torch_dtype = torch.float16 if device == "cuda" else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        trust_remote_code=True,
+        torch_dtype=torch_dtype,
+    )
+    model = model.to(device)
+    model.eval()
+
+    _florence2_bundle = {
+        "model_id": model_id,
+        "device": device,
+        "model": model,
+        "processor": processor,
+    }
+    print("[OK] Florence-2 loaded")
+    return _florence2_bundle
 
 
 def get_device():

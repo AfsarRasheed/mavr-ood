@@ -36,7 +36,8 @@ def _wrap_overlay_text(text, max_chars=58, indent=""):
 def generate_step_visualizations(image_np, scene_result, parsed_query,
                                   all_boxes_xyxy, all_labels, all_scores,
                                   clip_mask, clip_scores,
-                                  selected_idx, final_masks):
+                                  selected_idx, final_masks,
+                                  grounding_backend="gdino"):
     """
     Generate visualization images for each pipeline step.
 
@@ -104,7 +105,7 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2, cv2.LINE_AA)
     steps["step2_query"] = step2
 
-    # ---- Step 3: All Candidates (GroundingDINO) ----
+    # ---- Step 3: All Candidates (Grounding Backend) ----
     step3 = image_np.copy()
     if all_boxes_xyxy is not None and len(all_boxes_xyxy) > 0:
         boxes_np = all_boxes_xyxy.numpy() if torch.is_tensor(all_boxes_xyxy) else np.array(all_boxes_xyxy)
@@ -117,7 +118,8 @@ def generate_step_visualizations(image_np, scene_result, parsed_query,
         n_found = len(all_boxes_xyxy)
     else:
         n_found = 0
-    cv2.putText(step3, f"STEP 3: GroundingDINO - {n_found} candidates found", (10, H - 15),
+    backend_label = str(grounding_backend or "grounding").replace("_", "-")
+    cv2.putText(step3, f"STEP 3: {backend_label} - {n_found} candidates found", (10, H - 15),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2, cv2.LINE_AA)
     steps["step3_candidates"] = step3
 

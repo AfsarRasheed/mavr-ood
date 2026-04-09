@@ -9,6 +9,7 @@ import json
 import tempfile
 import numpy as np
 import torch
+from PIL import Image as PILImage
 
 from src.text_guided.scene_agent import scene_understanding
 from src.text_guided.attribute_agent import attribute_matching_agent
@@ -19,6 +20,8 @@ from src.text_guided.candidate_reasoner import summarize_candidate_match
 from src.text_guided.semantic_controller import build_semantic_plan
 from src.text_guided.candidate_judge import judge_candidate_against_plan
 from src.text_guided.reliability import determine_match_decision
+from src.text_guided.candidate_adapter import cxcywh_normalized_to_xyxy
+from src.text_guided.florence2_backend import run_florence2_grounding
 from src.agents.vlm_backend import run_vlm
 
 
@@ -156,6 +159,97 @@ def _run_anchor_detection(gdino_model, image_tensor_dev, anchor_text, H, W, thre
         "count": int(len(anchor_boxes_cxcywh)),
         "label": anchor_text,
     }
+
+
+def _resolve_text_guided_backend(requested_backend, florence2_backend):
+    backend = str(requested_backend or os.getenv("TEXT_GUIDED_BACKEND", "florence2")).strip().lower()
+    if backend not in {"gdino", "florence2"}:
+        print(f"[WARN] Unknown TEXT_GUIDED_BACKEND='{backend}', falling back to gdino")
+        return "gdino"
+    if backend == "florence2" and not florence2_backend:
+        print("[WARN] Florence-2 backend requested but not loaded, falling back to gdino")
+        return "gdino"
+    return backend
+
+
+def _run_gdino_candidate_proposal(gdino_model, image_tensor_dev, prompt, image_size, box_threshold):
+    from groundingdino.util.utils import get_phrases_from_posmap
+
+    height, width = image_size
+    caption = prompt.lower().strip()
+    if not caption.endswith("."):
+        caption += "."
+
+    with torch.no_grad():
+        outputs = gdino_model(image_tensor_dev[None], captions=[caption])
+
+    logits = outputs["pred_logits"].cpu().sigmoid()[0]
+    boxes_cxcywh = outputs["pred_boxes"].cpu()[0]
+    filt_mask = logits.max(dim=1)[0] > box_threshold
+    logits_filt = logits[filt_mask]
+    boxes_filt = boxes_cxcywh[filt_mask]
+
+    tokenizer = gdino_model.tokenizer
+    tokenized = tokenizer(caption)
+
+    labels = []
+    scores = []
+    for logit in logits_filt:
+        pred_phrase = get_phrases_from_posmap(logit > 0.25, tokenized, tokenizer)
+        score = float(logit.max().item())
+        labels.append(f"{pred_phrase}({score:.2f})")
+        scores.append(score)
+
+    return {
+        "backend": "gdino",
+        "prompt_used": prompt,
+        "boxes_cxcywh": boxes_filt,
+        "boxes_xyxy": cxcywh_normalized_to_xyxy(boxes_filt, (height, width)),
+        "labels": labels,
+        "scores": scores,
+        "raw_response": outputs,
+    }
+
+
+def _run_text_guided_candidate_proposal(
+    *,
+    backend_name,
+    gdino_model,
+    florence2_backend,
+    image_pil,
+    image_tensor_dev,
+    parsed,
+    image_size,
+    box_threshold,
+):
+    prompt = parsed["object_prompt"]
+
+    if backend_name == "florence2":
+        florence_result = run_florence2_grounding(
+            florence_model=florence2_backend["model"],
+            florence_processor=florence2_backend["processor"],
+            image_pil=image_pil,
+            prompt=prompt,
+            device=florence2_backend["device"],
+            image_size=image_size,
+        )
+        return {
+            "backend": "florence2",
+            "prompt_used": prompt,
+            "boxes_cxcywh": florence_result["boxes_cxcywh"],
+            "boxes_xyxy": florence_result["boxes_xyxy"],
+            "labels": florence_result["labels"],
+            "scores": florence_result["scores"],
+            "raw_response": florence_result["raw_response"],
+        }
+
+    return _run_gdino_candidate_proposal(
+        gdino_model=gdino_model,
+        image_tensor_dev=image_tensor_dev,
+        prompt=prompt,
+        image_size=image_size,
+        box_threshold=box_threshold,
+    )
 
 
 def _compute_spatial_score(box_xyxy, parsed, image_shape, anchor_boxes=None, anchor2_boxes=None,
@@ -432,6 +526,7 @@ Return ONLY valid JSON:
 
 def run_text_guided_pipeline(image_np, user_prompt, image_path,
                               gdino_model, sam_predictor, clip_verifier,
+                              florence2_backend=None, text_guided_backend=None,
                               box_threshold=0.35, clip_threshold=0.25,
                               precomputed_scene=None, precomputed_attr=None):
     """
@@ -458,7 +553,6 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
             selected_idx: selected box indices
             summary: text summary of results
     """
-    from PIL import Image as PILImage
     import groundingdino.datasets.transforms as T
 
     H, W = image_np.shape[:2]
@@ -538,8 +632,10 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         else:
             print(f"[i] Semantic controller kept detector prompt unchanged ({reason})")
 
-    # ---- Step 3: Candidate Detection (GroundingDINO) ----
-    print(f"[i] Running GroundingDINO with prompt: '{parsed['object_prompt']}'")
+    grounding_backend = _resolve_text_guided_backend(text_guided_backend, florence2_backend)
+
+    # ---- Step 3: Candidate Detection / Grounding ----
+    print(f"[i] Running {grounding_backend} grounding with prompt: '{parsed['object_prompt']}'")
 
     image_pil = PILImage.fromarray(image_np)
     transform = T.Compose([
@@ -550,75 +646,61 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     image_tensor, _ = transform(image_pil, None)
 
     device = next(gdino_model.parameters()).device
-
-    caption = parsed['object_prompt'].lower().strip()
-    if not caption.endswith("."):
-        caption += "."
-
     image_tensor_dev = image_tensor.to(device)
-    with torch.no_grad():
-        outputs = gdino_model(image_tensor_dev[None], captions=[caption])
 
-    logits = outputs["pred_logits"].cpu().sigmoid()[0]
-    boxes_cxcywh = outputs["pred_boxes"].cpu()[0]
+    candidate_output = _run_text_guided_candidate_proposal(
+        backend_name=grounding_backend,
+        gdino_model=gdino_model,
+        florence2_backend=florence2_backend,
+        image_pil=image_pil,
+        image_tensor_dev=image_tensor_dev,
+        parsed=parsed,
+        image_size=(H, W),
+        box_threshold=box_threshold,
+    )
+    boxes_filt = candidate_output["boxes_cxcywh"]
+    all_boxes_xyxy = candidate_output["boxes_xyxy"]
+    all_labels = candidate_output["labels"]
+    all_det_scores = candidate_output["scores"]
 
-    filt_mask = logits.max(dim=1)[0] > box_threshold
-    logits_filt = logits[filt_mask]
-    boxes_filt = boxes_cxcywh[filt_mask]
-
-    tokenizer = gdino_model.tokenizer
-    tokenized = tokenizer(caption)
-
-    from groundingdino.util.utils import get_phrases_from_posmap
-
-    print(f"[OK] GroundingDINO found {len(boxes_filt)} candidates")
+    print(f"[OK] {grounding_backend} found {len(boxes_filt)} candidates")
 
     # ---- Retry logic if 0 candidates found ----
-    if len(boxes_filt) == 0:
+    if grounding_backend == "gdino" and len(boxes_filt) == 0:
         # Retry 1: lower threshold
         retry_threshold = 0.20
         print(f"[WARN] 0 candidates — retrying with lower threshold ({retry_threshold})...")
-        filt_mask = logits.max(dim=1)[0] > retry_threshold
-        logits_filt = logits[filt_mask]
-        boxes_filt = boxes_cxcywh[filt_mask]
+        candidate_output = _run_gdino_candidate_proposal(
+            gdino_model=gdino_model,
+            image_tensor_dev=image_tensor_dev,
+            prompt=parsed["object_prompt"],
+            image_size=(H, W),
+            box_threshold=retry_threshold,
+        )
+        boxes_filt = candidate_output["boxes_cxcywh"]
+        all_boxes_xyxy = candidate_output["boxes_xyxy"]
+        all_labels = candidate_output["labels"]
+        all_det_scores = candidate_output["scores"]
         print(f"[i] Retry 1: {len(boxes_filt)} candidates at threshold {retry_threshold}")
 
-    if len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
+    if grounding_backend == "gdino" and len(boxes_filt) == 0 and parsed['object_prompt'] != user_prompt.lower().strip():
         # Retry 2: use raw user prompt
-        raw_caption = user_prompt.lower().strip()
-        if not raw_caption.endswith("."):
-            raw_caption += "."
+        raw_prompt = user_prompt.lower().strip()
+        raw_caption = raw_prompt
         print(f"[WARN] Still 0 — retrying with raw prompt: '{raw_caption}'")
-        with torch.no_grad():
-            outputs = gdino_model(image_tensor_dev[None], captions=[raw_caption])
-        logits = outputs["pred_logits"].cpu().sigmoid()[0]
-        boxes_cxcywh = outputs["pred_boxes"].cpu()[0]
-        filt_mask = logits.max(dim=1)[0] > 0.20
-        logits_filt = logits[filt_mask]
-        boxes_filt = boxes_cxcywh[filt_mask]
-        tokenized = tokenizer(raw_caption)
+        candidate_output = _run_gdino_candidate_proposal(
+            gdino_model=gdino_model,
+            image_tensor_dev=image_tensor_dev,
+            prompt=raw_prompt,
+            image_size=(H, W),
+            box_threshold=0.20,
+        )
+        boxes_filt = candidate_output["boxes_cxcywh"]
+        all_boxes_xyxy = candidate_output["boxes_xyxy"]
+        all_labels = candidate_output["labels"]
+        all_det_scores = candidate_output["scores"]
         print(f"[i] Retry 2: {len(boxes_filt)} candidates with raw prompt")
 
-    # Build labels and convert to xyxy (AFTER retries so data is final)
-    all_labels = []
-    all_det_scores = []
-    for logit, box in zip(logits_filt, boxes_filt):
-        pred_phrase = get_phrases_from_posmap(logit > 0.25, tokenized, tokenizer)
-        score = logit.max().item()
-        all_labels.append(f"{pred_phrase}({score:.2f})")
-        all_det_scores.append(score)
-
-    all_boxes_xyxy = torch.zeros(len(boxes_filt), 4)
-    if len(boxes_filt) > 0:
-        scaled = boxes_filt.clone()
-        scaled[:, 0] *= W
-        scaled[:, 1] *= H
-        scaled[:, 2] *= W
-        scaled[:, 3] *= H
-        all_boxes_xyxy[:, 0] = scaled[:, 0] - scaled[:, 2] / 2
-        all_boxes_xyxy[:, 1] = scaled[:, 1] - scaled[:, 3] / 2
-        all_boxes_xyxy[:, 2] = scaled[:, 0] + scaled[:, 2] / 2
-        all_boxes_xyxy[:, 3] = scaled[:, 1] + scaled[:, 3] / 2
 
     # ---- Step 4/5: CLIP + Full-Query Candidate Ranking ----
     clip_pass_mask = []
@@ -831,7 +913,8 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         image_np, scene_result, parsed,
         all_boxes_xyxy, all_labels, all_det_scores,
         clip_pass_mask, clip_scores_all,
-        selected_idx, final_masks
+        selected_idx, final_masks,
+        grounding_backend=grounding_backend,
     )
 
     # ---- Build Summary ----
@@ -852,6 +935,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         f"TEXT-GUIDED DETECTION RESULTS (Multi-Agent)",
         f"{'='*40}",
         f"Query: \"{user_prompt}\"",
+        f"Grounding Backend: {grounding_backend}",
         f"Detection Prompt: '{parsed['object_prompt']}'",
         f"Semantic Query Type: {semantic_plan.get('query_type', 'unknown')}",
         f"Target Object: {parsed.get('target_object', 'unknown')}",
@@ -882,7 +966,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     summary_lines.extend([
         f"",
-        f"STEP 3 - GroundingDINO: {n_detected} candidates detected",
+        f"STEP 3 - {grounding_backend}: {n_detected} candidates detected",
         f"STEP 4 - CLIP Verification: {n_verified}/{n_detected} passed",
         f"STEP 5 - Candidate Ranking: state='{match_state}', confidence={match_confidence:.3f}",
     ])
@@ -947,6 +1031,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
 
     reasoning_data = {
         "query": user_prompt,
+        "grounding_backend": grounding_backend,
         "scene_type": scene_type,
         "lighting": lighting,
         "n_objects": n_scene_objects,
@@ -1023,6 +1108,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
     with open(os.path.join(output_dir, f"{img_basename}_summary.json"), "w") as f:
         json.dump({
             "query": user_prompt,
+            "grounding_backend": grounding_backend,
             "detection_prompt": parsed['object_prompt'],
             "semantic_plan": semantic_plan,
             "spatial": parsed.get('spatial'),
@@ -1044,6 +1130,7 @@ def run_text_guided_pipeline(image_np, user_prompt, image_path,
         "parsed": parsed,
         "parsed_query": parsed,
         "semantic_plan": semantic_plan,
+        "grounding_backend": grounding_backend,
         "n_detected": n_detected,
         "n_verified": n_verified,
         "n_selected": n_selected,
