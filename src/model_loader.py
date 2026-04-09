@@ -15,6 +15,7 @@ Usage:
 
 import os
 import sys
+import json
 import traceback
 import torch
 
@@ -106,6 +107,34 @@ def _ensure_florence2_config_fields(config):
             setattr(target, "pad_token_id", fallback_pad)
 
     return config
+
+
+def _load_florence2_config_with_defaults(model_id):
+    """
+    Load Florence-2 config JSON first, inject missing fields into the nested
+    text config payload, then build the HF config object from that patched
+    dictionary.
+    """
+    from huggingface_hub import hf_hub_download
+    from transformers import AutoConfig
+
+    config_path = hf_hub_download(repo_id=model_id, filename="config.json")
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config_dict = json.load(handle)
+
+    text_config = dict(config_dict.get("text_config") or {})
+    text_config.setdefault("bos_token_id", config_dict.get("bos_token_id", 0))
+    text_config.setdefault("eos_token_id", config_dict.get("eos_token_id", 2))
+    text_config.setdefault("pad_token_id", config_dict.get("pad_token_id", 1))
+    text_config.setdefault("forced_bos_token_id", text_config.get("bos_token_id", 0))
+    config_dict["text_config"] = text_config
+    config_dict.setdefault("bos_token_id", text_config["bos_token_id"])
+    config_dict.setdefault("eos_token_id", text_config["eos_token_id"])
+    config_dict.setdefault("pad_token_id", text_config["pad_token_id"])
+    config_dict.setdefault("forced_bos_token_id", text_config["forced_bos_token_id"])
+
+    config = AutoConfig.for_model(config_dict.get("model_type", "florence2"), **config_dict)
+    return _ensure_florence2_config_fields(config)
 
 
 def _ensure_florence2_generation_config(model):
@@ -272,13 +301,12 @@ def load_florence2_model(model_id=None, device=None):
     device = device or DEVICE
     model_id = model_id or DEFAULT_FLORENCE2_MODEL_ID
 
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
+    from transformers import AutoModelForCausalLM, AutoProcessor
 
     try:
         print(f"[i] Loading Florence-2 ({model_id})...")
         processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-        config = _ensure_florence2_config_fields(config)
+        config = _load_florence2_config_with_defaults(model_id)
 
         torch_dtype = torch.float16 if device == "cuda" else torch.float32
         model = AutoModelForCausalLM.from_pretrained(
