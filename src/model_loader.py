@@ -329,33 +329,59 @@ def _patch_florence2_remote_code(model_id):
             "getattr(tokenizer, 'additional_special_tokens', []) +\\",
     }
 
+    # Files to patch with simple string replacement
+    simple_patch_map = {
+        "configuration_florence2.py": config_repairs,
+        "processing_florence2.py": processing_repairs,
+    }
+
     for root, dirs, files in os.walk(cache_base):
         if "florence" not in root.lower():
             continue
         for fname in files:
             filepath = os.path.join(root, fname)
-            repairs = {}
-            if fname == "configuration_florence2.py":
-                repairs = config_repairs
-            elif fname == "processing_florence2.py":
-                repairs = processing_repairs
-            else:
-                continue
 
-            with open(filepath, "r") as fh:
-                content = fh.read()
+            # --- Simple string replacements for config & processing ---
+            if fname in simple_patch_map:
+                repairs = simple_patch_map[fname]
+                with open(filepath, "r") as fh:
+                    content = fh.read()
 
-            changed = False
-            for old, new in repairs.items():
-                if old in content:
-                    content = content.replace(old, new)
-                    changed = True
+                changed = False
+                for old, new in repairs.items():
+                    if old in content:
+                        content = content.replace(old, new)
+                        changed = True
 
-            if changed:
-                with open(filepath, "w") as fh:
-                    fh.write(content)
-                patched_files.append(fname)
-                print(f"[OK] Patched: {filepath}")
+                if changed:
+                    with open(filepath, "w") as fh:
+                        fh.write(content)
+                    patched_files.append(fname)
+                    print(f"[OK] Patched: {filepath}")
+
+            # --- Comment out flash_attn imports in modeling file ---
+            elif fname == "modeling_florence2.py":
+                with open(filepath, "r") as fh:
+                    lines = fh.readlines()
+
+                changed = False
+                new_lines = []
+                for line in lines:
+                    stripped = line.strip()
+                    # Comment out any line that imports from flash_attn
+                    if (stripped.startswith("from flash_attn") or
+                            stripped.startswith("import flash_attn")):
+                        new_lines.append(
+                            f"# {stripped}  # patched out — eager attention\n")
+                        changed = True
+                    else:
+                        new_lines.append(line)
+
+                if changed:
+                    with open(filepath, "w") as fh:
+                        fh.writelines(new_lines)
+                    patched_files.append(fname)
+                    print(f"[OK] Patched flash_attn imports: {filepath}")
 
     # Step 3: Clear stale modules so Python reloads the patched files
     stale = [k for k in sys.modules if "florence" in k.lower()]
