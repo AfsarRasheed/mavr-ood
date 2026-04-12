@@ -293,17 +293,25 @@ def _patch_florence2_remote_code(model_id):
     """
     import os
 
-    # Step 1: Ensure ALL remote code files are cached on disk.
-    # We use huggingface_hub to download the full model repo, which caches
-    # all .py files (config, processing, modeling) at once. Individual
-    # Auto*.from_pretrained calls are used as fallbacks since they each
-    # only download a subset of files.
+    # Step 1: Download ONLY the remote .py code files (not the 1.5GB weights).
+    # Use get_cached_module_file to fetch specific code files into the
+    # transformers_modules cache.
+    code_files = [
+        "configuration_florence2.py",
+        "processing_florence2.py",
+        "modeling_florence2.py",
+    ]
     try:
-        from huggingface_hub import snapshot_download
-        snapshot_download(model_id, local_files_only=False)
-    except Exception:
+        from transformers.dynamic_module_utils import get_cached_module_file
+        for code_file in code_files:
+            try:
+                get_cached_module_file(model_id, code_file)
+            except Exception:
+                pass
+    except ImportError:
         pass
 
+    # Fallback: Auto* calls also cache code files (but not modeling)
     from transformers import AutoConfig, AutoProcessor
     try:
         AutoConfig.from_pretrained(model_id, trust_remote_code=True)
