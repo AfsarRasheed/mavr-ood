@@ -293,13 +293,18 @@ def _patch_florence2_remote_code(model_id):
     """
     import os
 
-    from transformers import AutoConfig, AutoProcessor
+    # Step 1: Ensure ALL remote code files are cached on disk.
+    # We use huggingface_hub to download the full model repo, which caches
+    # all .py files (config, processing, modeling) at once. Individual
+    # Auto*.from_pretrained calls are used as fallbacks since they each
+    # only download a subset of files.
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(model_id, local_files_only=False)
+    except Exception:
+        pass
 
-    # Step 1: Trigger download of ALL remote code files.
-    # AutoConfig only downloads configuration_florence2.py, while
-    # AutoProcessor also downloads processing_florence2.py.
-    # Both calls will likely crash due to bugs, but that's OK —
-    # we just need the .py files cached on disk.
+    from transformers import AutoConfig, AutoProcessor
     try:
         AutoConfig.from_pretrained(model_id, trust_remote_code=True)
     except Exception:
