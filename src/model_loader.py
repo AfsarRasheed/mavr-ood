@@ -407,6 +407,47 @@ def _patch_florence2_remote_code(model_id):
         print("[i] Florence-2 remote code — no patches needed")
 
 
+def _register_dummy_flash_attn():
+    """
+    Register a dummy ``flash_attn`` package in ``sys.modules``.
+
+    Florence-2's remote ``modeling_florence2.py`` imports ``flash_attn``, and
+    transformers' static import checker (``check_imports``) verifies it exists
+    via ``importlib.util.find_spec``. If not found, it raises ImportError
+    before the model even loads.
+
+    Since we use ``attn_implementation="eager"``, flash attention code paths
+    are never executed. This dummy satisfies the import check without
+    compiling the real CUDA extension (which takes 15+ minutes).
+    """
+    import types
+
+    if "flash_attn" in sys.modules:
+        return  # Already registered (real or dummy)
+
+    # Create main package
+    flash_attn = types.ModuleType("flash_attn")
+    flash_attn.__path__ = []  # Make it look like a package
+    flash_attn.__file__ = "dummy"
+
+    # Create sub-modules that Florence-2 might import from
+    flash_attn_iface = types.ModuleType("flash_attn.flash_attn_interface")
+
+    # Stub functions — never called with eager attention
+    def _stub(*args, **kwargs):
+        raise RuntimeError("flash_attn stub called — use attn_implementation='eager'")
+
+    flash_attn.flash_attn_func = _stub
+    flash_attn.flash_attn_varlen_func = _stub
+    flash_attn_iface.flash_attn_func = _stub
+    flash_attn_iface.flash_attn_varlen_func = _stub
+
+    # Register in sys.modules
+    sys.modules["flash_attn"] = flash_attn
+    sys.modules["flash_attn.flash_attn_interface"] = flash_attn_iface
+    print("[OK] Registered dummy flash_attn (eager attention only)")
+
+
 def load_florence2_model(model_id=None, device=None):
     """
     Load Florence-2 model + processor as a singleton bundle.
@@ -426,6 +467,11 @@ def load_florence2_model(model_id=None, device=None):
 
     try:
         print(f"[i] Loading Florence-2 ({model_id})...")
+
+        # Step 0: Register a dummy flash_attn module so transformers'
+        # static import checker passes. Since we use attn_implementation="eager",
+        # flash attention functions are never actually called.
+        _register_dummy_flash_attn()
 
         # Step 1: Download remote code and patch the config bug on disk
         _patch_florence2_remote_code(model_id)
