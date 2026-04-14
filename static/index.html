@@ -137,6 +137,26 @@
                             <span class="agent-model">LLaVA-7B</span>
                         </div>
                     </div>
+
+                    <div class="guided-gt-block">
+                        <label class="input-label">Ground Truth Mask (Optional)</label>
+                        <div class="upload-zone guided-gt-zone" id="guidedGtDropZone" style="min-height:180px">
+                            <input type="file" id="guidedGtFileInput" accept="image/png" hidden>
+                            <img id="guidedGtImagePreview" class="image-preview" style="display:none">
+                            <div class="upload-placeholder" id="guidedGtUploadPlaceholder">
+                                <div class="upload-icon" style="background: linear-gradient(135deg, #f43f5e, #f59e0b);">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <line x1="3" y1="9" x2="21" y2="9"/>
+                                        <line x1="9" y1="21" x2="9" y2="9"/>
+                                    </svg>
+                                </div>
+                                <p class="upload-title">Upload ground truth</p>
+                                <p class="upload-hint">PNG mask for text-guided evaluation</p>
+                            </div>
+                        </div>
+                        <button class="btn-clear" id="guidedGtClearBtn" style="display:none" onclick="clearGuidedGtMask()">Clear</button>
+                    </div>
                 </div>
             </section>
 
@@ -210,6 +230,35 @@
                     <h2 class="section-title">Reasoning Agent Output</h2>
                     <p class="reasoning-text" id="reasoningText"></p>
                 </div>
+
+                <!-- Evaluation Results -->
+                <details class="glass-card evaluation-details" id="guidedEvaluationDetails" style="display:none">
+                    <summary class="evaluation-summary">
+                        <span class="section-title evaluation-title">Evaluation Results</span>
+                        <span class="evaluation-hint">Expand to view ground truth comparison</span>
+                    </summary>
+
+                    <div class="guided-eval-metrics" id="guidedEvalMetrics">
+                        <div class="guided-eval-metric">
+                            <div class="guided-eval-metric-value" id="guidedEvalIou">--</div>
+                            <div class="metric-label">IoU</div>
+                        </div>
+                        <div class="guided-eval-metric">
+                            <div class="guided-eval-metric-value" id="guidedEvalF1">--</div>
+                            <div class="metric-label">F1</div>
+                        </div>
+                        <div class="guided-eval-metric">
+                            <div class="guided-eval-metric-value" id="guidedEvalPrecision">--</div>
+                            <div class="metric-label">Precision</div>
+                        </div>
+                        <div class="guided-eval-metric">
+                            <div class="guided-eval-metric-value" id="guidedEvalRecall">--</div>
+                            <div class="metric-label">Recall</div>
+                        </div>
+                    </div>
+
+                    <div class="guided-eval-grid" id="guidedEvalGrid"></div>
+                </details>
             </section>
         </div>
 

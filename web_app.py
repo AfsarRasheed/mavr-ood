@@ -126,6 +126,7 @@ async def health():
 async def detect(
     image: UploadFile = File(...),
     query: str = Form(...),
+    gt_mask: UploadFile = File(None),
 ):
     """Run the full MAVR pipeline."""
     if not models:
@@ -178,6 +179,69 @@ async def detect(
                 overlay[mask] = overlay[mask] * 0.4 + np.array([100, 180, 255]) * 0.6
             final_overlay = img_to_b64(overlay.astype(np.uint8))
 
+        evaluation_metrics = None
+        evaluation_images = None
+        if gt_mask is not None and final_masks is not None:
+            gt_bytes = await gt_mask.read()
+            gt_pil = Image.open(io.BytesIO(gt_bytes)).convert("L")
+            gt_np = np.array(gt_pil)
+            gt_binary = (gt_np > 0).astype(np.uint8)
+
+            pred_binary = np.zeros((H, W), dtype=np.uint8)
+            for i in range(len(final_masks)):
+                m = final_masks[i]
+                if hasattr(m, 'cpu'):
+                    m = m.cpu().numpy()
+                if m.ndim == 3:
+                    m = m[0]
+                m = (m > 0).astype(np.uint8)
+                if m.shape != pred_binary.shape:
+                    m = cv2.resize(m.astype(np.float32), (W, H), interpolation=cv2.INTER_NEAREST)
+                    m = (m > 0.5).astype(np.uint8)
+                pred_binary = np.maximum(pred_binary, m)
+
+            if gt_binary.shape != pred_binary.shape:
+                gt_binary = cv2.resize(gt_binary.astype(np.float32), (W, H), interpolation=cv2.INTER_NEAREST)
+                gt_binary = (gt_binary > 0.5).astype(np.uint8)
+
+            intersection = int((pred_binary & gt_binary).sum())
+            union = int(((pred_binary + gt_binary) > 0).sum())
+            tp = intersection
+            fp = int((pred_binary & (1 - gt_binary)).sum())
+            fn = int(((1 - pred_binary) & gt_binary).sum())
+
+            iou = float(intersection / (union + 1e-8))
+            precision = float(tp / (tp + fp + 1e-8))
+            recall = float(tp / (tp + fn + 1e-8))
+            f1 = float(2 * precision * recall / (precision + recall + 1e-8))
+
+            gt_overlay = img_np.copy().astype(np.float32)
+            gt_overlay[gt_binary.astype(bool)] = gt_overlay[gt_binary.astype(bool)] * 0.4 + np.array([0, 255, 0]) * 0.6
+
+            pred_overlay = img_np.copy().astype(np.float32)
+            pred_overlay[pred_binary.astype(bool)] = pred_overlay[pred_binary.astype(bool)] * 0.4 + np.array([80, 170, 255]) * 0.6
+
+            error_vis = img_np.copy().astype(np.float32)
+            overlap = (pred_binary == 1) & (gt_binary == 1)
+            false_pos = (pred_binary == 1) & (gt_binary == 0)
+            false_neg = (pred_binary == 0) & (gt_binary == 1)
+            error_vis[overlap] = error_vis[overlap] * 0.35 + np.array([0, 255, 0]) * 0.65
+            error_vis[false_pos] = error_vis[false_pos] * 0.35 + np.array([255, 0, 0]) * 0.65
+            error_vis[false_neg] = error_vis[false_neg] * 0.35 + np.array([0, 102, 255]) * 0.65
+
+            evaluation_metrics = {
+                "iou": round(iou, 4),
+                "f1": round(f1, 4),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+            }
+            evaluation_images = {
+                "original": img_to_b64(img_np),
+                "ground_truth": img_to_b64(gt_overlay.astype(np.uint8)),
+                "prediction": img_to_b64(pred_overlay.astype(np.uint8)),
+                "error_map": img_to_b64(error_vis.astype(np.uint8)),
+            }
+
         # Parse query info
         parsed = results.get('parsed_query', {})
         attr_result = results.get('attr_result', {}) or {}
@@ -201,6 +265,8 @@ async def detect(
             "attribute_matches": attr_result.get('matched_objects', []),
             "reasoning": results.get('reasoning', 'No reasoning available.'),
             "summary": results.get('summary', ''),
+            "evaluation_metrics": evaluation_metrics,
+            "evaluation_images": evaluation_images,
         })
 
     except Exception as e:

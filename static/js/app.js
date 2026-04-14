@@ -6,6 +6,7 @@
 let selectedFile = null;
 let oodFile = null;
 let gtFile = null;
+let guidedGtFile = null;
 let stepImages = {};
 let currentTextGuidedResult = null;
 let timer = null;
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initUpload('dropZone', 'fileInput', 'imagePreview', 'uploadPlaceholder', 'clearBtn', (f) => selectedFile = f);
     initUpload('oodDropZone', 'oodFileInput', 'oodImagePreview', 'oodUploadPlaceholder', 'oodClearBtn', (f) => oodFile = f);
     initUpload('gtDropZone', 'gtFileInput', 'gtImagePreview', 'gtUploadPlaceholder', 'gtClearBtn', (f) => gtFile = f);
+    initUpload('guidedGtDropZone', 'guidedGtFileInput', 'guidedGtImagePreview', 'guidedGtUploadPlaceholder', 'guidedGtClearBtn', (f) => guidedGtFile = f);
     initComparison();
     checkHealth();
 });
@@ -86,6 +88,11 @@ function clearImage() {
     document.getElementById('fileInput').value = '';
 }
 
+function clearGuidedGtMask() {
+    clearUploadState('guidedGtImagePreview', 'guidedGtUploadPlaceholder', 'guidedGtClearBtn', 'guidedGtFileInput');
+    guidedGtFile = null;
+}
+
 function clearOodImage() {
     clearUploadState('oodImagePreview', 'oodUploadPlaceholder', 'oodClearBtn', 'oodFileInput');
     oodFile = null;
@@ -123,6 +130,7 @@ async function runDetection() {
         const formData = new FormData();
         formData.append('image', selectedFile);
         formData.append('query', query);
+        if (guidedGtFile) formData.append('gt_mask', guidedGtFile);
 
         const response = await fetch('/api/detect', { method: 'POST', body: formData });
         const data = await safeJson(response);
@@ -268,8 +276,50 @@ function renderResults(data) {
 
     // Reasoning
     document.getElementById('reasoningText').textContent = data.reasoning || 'No reasoning output.';
+    renderGuidedEvaluation(data);
 
     setTimeout(() => section.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+}
+
+function renderGuidedEvaluation(data) {
+    const details = document.getElementById('guidedEvaluationDetails');
+    const grid = document.getElementById('guidedEvalGrid');
+    if (!details || !grid) return;
+
+    const metrics = data.evaluation_metrics;
+    const images = data.evaluation_images;
+    const hasEvaluation = !!(metrics && images);
+
+    if (!hasEvaluation) {
+        details.style.display = 'none';
+        details.open = false;
+        grid.innerHTML = '';
+        return;
+    }
+
+    details.style.display = 'block';
+    details.open = false;
+
+    document.getElementById('guidedEvalIou').textContent = formatMetricPercent(metrics.iou);
+    document.getElementById('guidedEvalF1').textContent = formatMetricPercent(metrics.f1);
+    document.getElementById('guidedEvalPrecision').textContent = formatMetricPercent(metrics.precision);
+    document.getElementById('guidedEvalRecall').textContent = formatMetricPercent(metrics.recall);
+
+    const cards = [
+        { title: 'Original', image: images.original },
+        { title: 'Ground Truth', image: images.ground_truth },
+        { title: 'Prediction', image: images.prediction },
+        { title: 'Overlap / Error Map', image: images.error_map },
+    ].filter(card => !!card.image);
+
+    grid.innerHTML = cards.map(card => `
+        <div class="guided-eval-card">
+            <div class="guided-eval-image-wrap">
+                <img class="guided-eval-image" src="data:image/jpeg;base64,${card.image}" alt="${card.title}">
+            </div>
+            <div class="guided-eval-title">${card.title}</div>
+        </div>
+    `).join('');
 }
 
 function getLastStepImage(imgs) {
@@ -540,6 +590,11 @@ function setOodMetric(valueId, barId, value) {
     setTimeout(() => {
         document.getElementById(barId).style.width = pct !== '--' ? pct + '%' : '0%';
     }, 200);
+}
+
+function formatMetricPercent(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '--';
+    return (value * 100).toFixed(1) + '%';
 }
 
 // ── Image Comparison Slider ─────────────────────────
