@@ -729,7 +729,7 @@ body {
 
 .guided-eval-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 18px;
 }
 
@@ -1015,7 +1015,7 @@ body {
     .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr 1fr; }
     .guided-eval-metrics { grid-template-columns: repeat(2, 1fr); }
-    .guided-eval-grid { grid-template-columns: 1fr; }
+    .guided-eval-grid { grid-template-columns: 1fr 1fr; }
     .agent-cards-grid { grid-template-columns: 1fr; }
     .agent-analysis-summary {
         align-items: flex-start;
@@ -1030,6 +1030,7 @@ body {
     .ood-results-grid { grid-template-columns: 1fr; }
     .ood-panels-grid { grid-template-columns: 1fr; }
     .steps-gallery-grid { grid-template-columns: 1fr; }
+    .guided-eval-grid { grid-template-columns: 1fr; }
     .guided-eval-metrics { grid-template-columns: 1fr; }
     .nav-tab { padding: 10px 12px; font-size: 12px; }
 }
