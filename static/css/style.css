@@ -240,6 +240,16 @@ body {
 
 /* Upload Zone */
 .upload-card { position: relative; }
+.guided-upload-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+.upload-card > .upload-zone {
+    min-height: 300px;
+}
+
 .upload-zone {
     border: 2.5px dashed rgba(255,107,53,0.25);
     border-radius: var(--radius-md);
@@ -411,12 +421,15 @@ body {
 }
 
 .guided-gt-block {
-    margin-top: 22px;
     position: relative;
 }
 
 .guided-gt-zone {
     min-height: 180px;
+}
+
+.guided-gt-zone .image-preview {
+    max-height: 220px;
 }
 
 /* ── Pipeline Progress ───────────────────────────── */
