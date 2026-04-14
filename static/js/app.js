@@ -606,7 +606,7 @@ function initComparison() {
     const update = (clientX) => {
         if (!dragging) return;
         const rect = container.getBoundingClientRect();
-        let x = Math.max(0.03, Math.min(0.97, (clientX - rect.left) / rect.width));
+        let x = Math.max(-0.02, Math.min(1.02, (clientX - rect.left) / rect.width));
         document.getElementById('compOverlay').style.clipPath = `inset(0 0 0 ${x * 100}%)`;
         document.getElementById('compHandle').style.left = (x * 100) + '%';
     };
